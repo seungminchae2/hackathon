@@ -39,7 +39,6 @@ road_doctor_mvp/
 ## 3. 실행
 
 ```bash
-cd road_doctor_mvp
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
