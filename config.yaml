@@ -1,0 +1,27 @@
+project:
+  grid_size_m: 500
+  random_seed: 42
+
+paths:
+  potholes: data/potholes.csv
+  repairs: data/repairs.csv
+  roads: data/roads.csv
+  weather_history: data/weather_history.csv
+  weather_forecast: data/weather_forecast.csv
+  model: models/road_doctor.joblib
+  predictions: outputs/predictions.csv
+
+training:
+  start_date: null
+  end_date: null
+  test_ratio: 0.20
+  validation_ratio: 0.15
+  negative_downsample_ratio: 8
+  risk_top_k: 20
+
+model:
+  n_estimators: 350
+  max_depth: 4
+  learning_rate: 0.05
+  subsample: 0.85
+  colsample_bytree: 0.85
