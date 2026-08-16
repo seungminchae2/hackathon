@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root { --ink:#10231c; --muted:#66756f; --paper:#f5f7f4; --line:#dfe6e1; --green:#0d6b4f; --orange:#ed7a2c; }
+    * { box-sizing:border-box; }
+    html, body { margin:0; width:100%; height:100%; font-family:Pretendard,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--ink); background:transparent; }
+    button, input, select { font:inherit; }
+    .shell { display:grid; grid-template-columns:minmax(0,1.75fr) minmax(340px,.9fr); grid-template-rows:minmax(0,1fr); height:710px; overflow:hidden; border:1px solid var(--line); border-radius:18px; background:#fff; }
+    .map-wrap { position:relative; min-width:0; min-height:0; overflow:hidden; background:#e8ede9; }
+    #map { width:100%; height:100%; }
+    .map-empty { position:absolute; inset:0; display:none; place-items:center; padding:32px; text-align:center; background:linear-gradient(135deg,#e8f2ec,#f8f3e9); z-index:3; }
+    .map-empty strong { display:block; font-size:21px; margin-bottom:8px; }
+    .map-empty code { display:inline-block; margin-top:10px; padding:7px 10px; border-radius:8px; background:#fff; border:1px solid var(--line); }
+    .route-badge { position:absolute; display:none; left:16px; top:16px; z-index:4; max-width:360px; padding:12px 14px; border-radius:13px; background:rgba(255,255,255,.96); box-shadow:0 5px 20px rgba(16,35,28,.15); }
+    .route-badge b { display:block; color:var(--green); font-size:13px; margin-bottom:4px; }
+    .route-badge span { display:block; color:var(--muted); font-size:11px; line-height:1.4; }
+    .legend { position:absolute; left:16px; bottom:16px; z-index:2; display:flex; gap:9px; align-items:center; padding:9px 12px; border-radius:999px; background:rgba(255,255,255,.94); box-shadow:0 4px 18px rgba(16,35,28,.12); font-size:12px; }
+    .dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:4px; }
+    .side { min-width:0; min-height:0; overflow:hidden; display:flex; flex-direction:column; border-left:1px solid var(--line); background:#fbfcfa; }
+    .side-head { padding:20px 18px 14px; border-bottom:1px solid var(--line); background:#fff; }
+    .eyebrow { font-size:11px; letter-spacing:.13em; color:var(--green); font-weight:800; }
+    h2 { margin:5px 0 4px; font-size:21px; letter-spacing:-.04em; }
+    .sub { color:var(--muted); font-size:12px; }
+    .controls { display:grid; grid-template-columns:1fr 110px; gap:8px; margin-top:14px; }
+    input, select { width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 11px; background:#fff; color:var(--ink); outline:none; }
+    input:focus, select:focus { border-color:#64a88e; box-shadow:0 0 0 3px rgba(13,107,79,.08); }
+    .list { flex:1; min-height:0; overflow:auto; padding:10px; }
+    .card { width:100%; display:grid; grid-template-columns:42px 1fr auto; gap:10px; align-items:center; border:1px solid transparent; border-bottom-color:var(--line); background:transparent; padding:12px 8px; text-align:left; cursor:pointer; color:inherit; }
+    .card:hover, .card.active { background:#fff; border-color:#cfdad3; border-radius:12px; box-shadow:0 5px 16px rgba(16,35,28,.06); }
+    .rank { display:grid; place-items:center; width:36px; height:36px; border-radius:11px; background:#edf2ee; color:var(--green); font-weight:850; font-size:13px; }
+    .name { font-weight:780; font-size:14px; }
+    .reason { margin-top:4px; color:var(--muted); font-size:11px; line-height:1.35; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
+    .scores { text-align:right; }
+    .score { font-weight:850; font-size:15px; }
+    .level { margin-top:3px; font-size:10px; font-weight:750; }
+    .detail { display:none; padding:14px 18px 18px; border-top:1px solid var(--line); background:#fff; }
+    .detail.show { display:block; }
+    .detail-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+    .detail-title { font-weight:850; }
+    .close { border:0; background:#eef2ef; border-radius:8px; width:28px; height:28px; cursor:pointer; }
+    .detail-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+    .metric { padding:9px; border-radius:10px; background:#f4f6f3; }
+    .metric b { display:block; font-size:14px; }
+    .metric span { color:var(--muted); font-size:10px; }
+    .detail-reason { margin-top:10px; padding:10px; border-left:3px solid var(--orange); background:#fff8f1; color:#6d4b32; font-size:12px; line-height:1.45; }
+    .marker { transform:translate(-50%,-50%); border:2px solid #fff; border-radius:50%; box-shadow:0 3px 10px rgba(0,0,0,.24); cursor:pointer; transition:transform .16s; }
+    .marker:hover, .marker.selected { transform:translate(-50%,-50%) scale(1.32); z-index:5; }
+    .danger-ring { width:34px; height:34px; transform:translate(-50%,-50%); border:4px solid #d93b36; border-radius:50%; box-shadow:0 0 0 5px rgba(217,59,54,.18); pointer-events:none; }
+    .route-pin { display:grid; place-items:center; width:30px; height:30px; transform:translate(-50%,-100%); border:3px solid #fff; border-radius:50% 50% 50% 4px; rotate:-45deg; color:#fff; font-size:11px; font-weight:850; box-shadow:0 3px 12px rgba(0,0,0,.28); }
+    .route-pin span { rotate:45deg; }
+    .empty-list { padding:30px 14px; text-align:center; color:var(--muted); }
+    @media(max-width:760px) { .shell { grid-template-columns:1fr; grid-template-rows:390px 420px; height:810px; } .side { border-left:0; border-top:1px solid var(--line); } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="map-wrap">
+      <div id="map"></div>
+      <div id="mapEmpty" class="map-empty"><div><strong>카카오 지도 키가 필요합니더</strong><span>.env에 JavaScript 키를 넣고 화면을 새로고침하십시오.</span><br><code>KAKAO_MAP_APP_KEY=발급받은_JavaScript_키</code></div></div>
+      <div id="routeBadge" class="route-badge"></div>
+      <div class="legend"><span><i class="dot" style="background:#d93b36"></i>매우 높음</span><span><i class="dot" style="background:#ed7a2c"></i>높음</span><span><i class="dot" style="background:#e7b642"></i>보통</span><span><i class="dot" style="background:#3d8b68"></i>낮음</span></div>
+    </section>
+    <aside class="side">
+      <header class="side-head">
+        <div class="eyebrow">MAINTENANCE QUEUE</div>
+        <h2>우선 보수 대상</h2>
+        <div class="sub" id="countText">격자 목록을 불러오는 중</div>
+        <div class="controls">
+          <input id="search" placeholder="격자 ID 검색" />
+          <select id="riskFilter"><option value="all">전체 등급</option><option>매우 높음</option><option>높음</option><option>보통</option><option>낮음</option></select>
+        </div>
+      </header>
+      <div id="list" class="list"></div>
+      <section id="detail" class="detail"></section>
+    </aside>
+  </main>
+  <script>
+    let rows = [];
+    let kakaoKey = "";
+    let routePlan = null;
+    let map = null;
+    let selectedId = null;
+    let initialized = false;
+    const overlays = new Map();
+    const routeObjects = [];
+    const colors = {"매우 높음":"#d93b36","높음":"#ed7a2c","보통":"#e7b642","낮음":"#3d8b68"};
+
+    const pct = v => Number.isFinite(Number(v)) ? `${(Number(v)*100).toFixed(1)}%` : "-";
+    const num = (v, suffix="") => Number.isFinite(Number(v)) ? `${Number(v).toLocaleString("ko-KR",{maximumFractionDigits:1})}${suffix}` : "-";
+    const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+
+    function send(type, payload={}) {
+      window.parent.postMessage({isStreamlitMessage:true,type,...payload}, "*");
+    }
+
+    function filteredRows() {
+      const q = document.getElementById("search").value.trim().toLowerCase();
+      const level = document.getElementById("riskFilter").value;
+      return rows.filter(r => (!q || String(r.grid_id).toLowerCase().includes(q)) && (level === "all" || r.risk_level === level));
+    }
+
+    function renderList() {
+      const filtered = filteredRows();
+      document.getElementById("countText").textContent = `${filtered.length.toLocaleString("ko-KR")}개 격자 · priority_score 순`;
+      document.getElementById("list").innerHTML = filtered.length ? filtered.map(r => `
+        <button class="card ${selectedId === r.grid_id ? "active" : ""}" data-id="${esc(r.grid_id)}">
+          <span class="rank">${esc(r.priority_rank)}</span>
+          <span><span class="name">${esc(r.grid_id)}</span><span class="reason">${esc(r.risk_reason)}</span></span>
+          <span class="scores"><span class="score">${pct(r.priority_score)}</span><span class="level" style="color:${colors[r.risk_level] || "#66756f"}">${esc(r.risk_level)}</span></span>
+        </button>`).join("") : '<div class="empty-list">조건에 맞는 격자가 없습니더.</div>';
+      document.querySelectorAll(".card").forEach(el => el.addEventListener("click", () => selectRow(el.dataset.id, true)));
+    }
+
+    function selectRow(id, pan) {
+      const row = rows.find(r => String(r.grid_id) === String(id));
+      if (!row) return;
+      selectedId = row.grid_id;
+      document.querySelectorAll(".marker").forEach(el => el.classList.toggle("selected", el.dataset.id === String(id)));
+      const detail = document.getElementById("detail");
+      detail.className = "detail show";
+      detail.innerHTML = `<div class="detail-top"><span class="detail-title">#${esc(row.priority_rank)} · ${esc(row.grid_id)}</span><button class="close" aria-label="닫기">×</button></div>
+        <div class="detail-grid"><div class="metric"><b>${pct(row.risk_score)}</b><span>모델 위험도</span></div><div class="metric"><b>${pct(row.recurrence_score)}</b><span>재발 위험</span></div><div class="metric"><b>${pct(row.priority_score)}</b><span>우선순위 점수</span></div><div class="metric"><b>${num(row.precip_7d,"mm")}</b><span>7일 강수</span></div><div class="metric"><b>${num(row.freeze_thaw_7d,"회")}</b><span>동결·융해</span></div><div class="metric"><b>${num(row.past_potholes_total,"건")}</b><span>누적 포트홀</span></div></div>
+        <div class="detail-reason"><b>모델 기여 원인</b><br>${esc(row.risk_reason)}</div>`;
+      detail.querySelector(".close").addEventListener("click", () => { selectedId = null; detail.className="detail"; renderList(); });
+      renderList();
+      if (pan && map && window.kakao) { map.panTo(new kakao.maps.LatLng(Number(row.grid_lat), Number(row.grid_lon))); map.setLevel(5); }
+    }
+
+    function showMapError(title, message) {
+      const empty = document.getElementById("mapEmpty");
+      empty.style.display = "grid";
+      empty.querySelector("strong").textContent = title;
+      empty.querySelector("span").textContent = message;
+    }
+
+    function clearRoutes() {
+      while (routeObjects.length) {
+        const item = routeObjects.pop();
+        if (item && typeof item.setMap === "function") item.setMap(null);
+      }
+      document.getElementById("routeBadge").style.display = "none";
+    }
+
+    function routePin(label, color, point) {
+      const element = document.createElement("div");
+      element.className = "route-pin";
+      element.style.background = color;
+      element.innerHTML = `<span>${esc(label)}</span>`;
+      const overlay = new kakao.maps.CustomOverlay({
+        position:new kakao.maps.LatLng(Number(point.lat), Number(point.lon)),
+        content:element,
+        yAnchor:0,
+        zIndex:8,
+      });
+      overlay.setMap(map);
+      routeObjects.push(overlay);
+    }
+
+    function renderRoutePlan() {
+      if (!map || !window.kakao) return;
+      clearRoutes();
+      if (!routePlan || !Array.isArray(routePlan.routes) || !routePlan.routes.length) return;
+
+      const bounds = new kakao.maps.LatLngBounds();
+      const ordered = [...routePlan.routes].sort((a,b) => Number(a.selected) - Number(b.selected));
+      ordered.forEach(route => {
+        const path = (route.path || []).map(point => {
+          const latlng = new kakao.maps.LatLng(Number(point[1]), Number(point[0]));
+          bounds.extend(latlng);
+          return latlng;
+        });
+        if (path.length < 2) return;
+        const line = new kakao.maps.Polyline({
+          path,
+          strokeWeight:route.selected ? 8 : 4,
+          strokeColor:route.color || "#64748b",
+          strokeOpacity:route.selected ? .95 : .55,
+          strokeStyle:"solid",
+        });
+        line.setMap(map);
+        routeObjects.push(line);
+      });
+
+      const recommended = routePlan.routes.find(route => route.id === routePlan.recommended_id) || routePlan.routes[0];
+      (recommended.danger_points || []).forEach(point => {
+        const ring = document.createElement("div");
+        ring.className = "danger-ring";
+        ring.title = `${point.grid_id} · 위험도 ${pct(point.risk_score)}`;
+        const overlay = new kakao.maps.CustomOverlay({
+          position:new kakao.maps.LatLng(Number(point.lat), Number(point.lon)),
+          content:ring,
+          yAnchor:.5,
+          zIndex:7,
+        });
+        overlay.setMap(map);
+        routeObjects.push(overlay);
+      });
+
+      bounds.extend(new kakao.maps.LatLng(Number(routePlan.origin.lat), Number(routePlan.origin.lon)));
+      bounds.extend(new kakao.maps.LatLng(Number(routePlan.destination.lat), Number(routePlan.destination.lon)));
+      routePin("출", "#2563eb", routePlan.origin);
+      routePin("도", "#d93b36", routePlan.destination);
+      map.setBounds(bounds, 70, 60, 70, 60);
+
+      const badge = document.getElementById("routeBadge");
+      badge.style.display = "block";
+      badge.innerHTML = `<b>${esc(recommended.label)}</b><span>${esc(routePlan.message)}</span>`;
+    }
+
+    function initMap() {
+      const valid = rows.filter(r => Number.isFinite(Number(r.grid_lat)) && Number.isFinite(Number(r.grid_lon)));
+      if (!valid.length) { showMapError("표시할 좌표가 없습니더", "예측 CSV의 위도·경도를 확인하십시오."); return; }
+      const avgLat = valid.reduce((s,r) => s + Number(r.grid_lat), 0) / valid.length;
+      const avgLon = valid.reduce((s,r) => s + Number(r.grid_lon), 0) / valid.length;
+      map = new kakao.maps.Map(document.getElementById("map"), {center:new kakao.maps.LatLng(avgLat,avgLon),level:11});
+      map.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
+      valid.forEach(r => {
+        const size = Math.round(14 + Number(r.risk_score || 0) * 14);
+        const marker = document.createElement("div");
+        marker.className = "marker";
+        marker.dataset.id = r.grid_id;
+        marker.title = `${r.grid_id} · 위험도 ${pct(r.risk_score)}`;
+        marker.style.cssText = `width:${size}px;height:${size}px;background:${colors[r.risk_level] || "#3d8b68"};`;
+        marker.addEventListener("click", () => selectRow(r.grid_id, false));
+        const overlay = new kakao.maps.CustomOverlay({position:new kakao.maps.LatLng(Number(r.grid_lat),Number(r.grid_lon)),content:marker,yAnchor:.5,zIndex:Number(r.priority_rank) <= 20 ? 3 : 1});
+        overlay.setMap(map); overlays.set(String(r.grid_id), overlay);
+      });
+      renderRoutePlan();
+    }
+
+    function initialize() {
+      renderList();
+      if (!kakaoKey) { showMapError("카카오 지도 키가 필요합니더", ".env에 JavaScript 키를 입력하고 새로고침하십시오."); return; }
+      const sdk = document.createElement("script");
+      sdk.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(kakaoKey)}&autoload=false`;
+      sdk.onload = () => kakao.maps.load(initMap);
+      sdk.onerror = () => showMapError("카카오 지도를 불러오지 못했습니더", "REST API 키가 아닌 JavaScript 키인지, localhost:8501이 Web 플랫폼에 등록됐는지 확인하십시오.");
+      document.head.appendChild(sdk);
+    }
+
+    window.addEventListener("message", event => {
+      if (event.data?.type !== "streamlit:render") return;
+      rows = Array.isArray(event.data.args?.rows) ? event.data.args.rows : [];
+      kakaoKey = String(event.data.args?.appKey || "");
+      routePlan = event.data.args?.routePlan || null;
+      const height = Number(event.data.args?.componentHeight || 730);
+      send("streamlit:setFrameHeight", {height});
+      if (!initialized) { initialized = true; initialize(); } else { renderList(); renderRoutePlan(); }
+    });
+    document.getElementById("search").addEventListener("input", renderList);
+    document.getElementById("riskFilter").addEventListener("change", renderList);
+    send("streamlit:componentReady", {apiVersion:1});
+    send("streamlit:setFrameHeight", {height:730});
+  </script>
+</body>
+</html>

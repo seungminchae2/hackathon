@@ -1,0 +1,10 @@
+feature,gain_importance
+past_potholes_total,0.2178877
+has_repair_history,0.18699405
+grid_lon,0.121901274
+grid_lat,0.11925063
+freeze_thaw_7d,0.114010535
+past_potholes_90d,0.11384861
+days_since_last_repair,0.061431494
+precip_7d,0.044393156
+precip_3d,0.020282628

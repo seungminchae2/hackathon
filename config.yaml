@@ -8,20 +8,30 @@ paths:
   roads: data/roads.csv
   weather_history: data/weather_history.csv
   weather_forecast: data/weather_forecast.csv
-  model: models/road_doctor.joblib
-  predictions: outputs/predictions.csv
+  model: models/road_doctor_v2.joblib
+  predictions: outputs/predictions_v2.csv
+  metrics: outputs/metrics_v2.json
+  feature_importance: outputs/feature_importance_v2.csv
 
 training:
   start_date: null
   end_date: null
-  test_ratio: 0.20
+  target_horizon_days: 30
   validation_ratio: 0.15
-  negative_downsample_ratio: 8
-  risk_top_k: 20
+  test_ratio: 0.20
 
 model:
-  n_estimators: 350
+  n_estimators: 700
   max_depth: 4
   learning_rate: 0.05
+  min_child_weight: 5
   subsample: 0.85
   colsample_bytree: 0.85
+  reg_alpha: 0.05
+  reg_lambda: 1.0
+  eval_metric: logloss
+  early_stopping_rounds: 50
+
+kakao:
+  app_key_env: KAKAO_MAP_APP_KEY
+  rest_api_key_env: KAKAO_REST_API_KEY
