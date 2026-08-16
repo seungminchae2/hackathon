@@ -1,145 +1,134 @@
-# Road Doctor MVP
+# Road Doctor
 
-전북 지역의 포트홀 민원·보수 이력과 기상 데이터를 결합해 **500m 격자별 포트홀 발생 위험도**를 예측하는 해커톤용 최소 구현입니다.
+전북 도로를 약 500m 격자로 나누고, 각 기준일의 **다음 30일 내 포트홀 발생 상대 위험도**와 보수 우선순위를 산출하는 해커톤용 프로젝트입니다.
 
-## 1. 기능
+## 설계 요약
 
-- 포트홀 좌표를 500m 격자로 변환
-- 과거 1·3·7일 강수량, 일교차, 동결·융해 횟수 생성
-- 동일 격자의 과거 포트홀 발생 횟수와 최근 보수 경과일 생성
-- XGBoost로 위험도 학습
-- 오늘·내일 예보를 넣어 격자별 위험도 산출
-- Streamlit 지도에서 위험 구간과 원인 표시
+- 모델: XGBoost 이진 분류
+- 검증: 시간 순서 기준 train / validation / test 분할
+- 불균형 처리: train 구간의 음성/양성 비율을 `scale_pos_weight`에 반영
+- 평가: ROC-AUC, PR-AUC, F1
+- 위험 설명: XGBoost feature contribution을 의미 그룹별로 합산한 양(+) 기여 상위 2~3개
+- 지도: 카카오 지도 JavaScript SDK + 보수 우선순위 목록
 
-## 2. 프로젝트 구조
+`risk_score`는 보정된 절대 발생확률이 아니라 격자 간 순위를 위한 상대 위험 점수입니다. 위험 등급도 해당 예측일의 백분위로 나눕니다.
 
-```text
-road_doctor_mvp/
-├── app.py
-├── config.yaml
-├── requirements.txt
-├── data/
-│   ├── potholes.csv
-│   ├── repairs.csv
-│   ├── roads.csv
-│   ├── weather_history.csv
-│   └── weather_forecast.csv
-├── models/
-├── outputs/
-├── scripts/
-│   ├── make_sample_data.py
-│   └── shp_to_road_points.py
-└── src/
-    ├── common.py
-    ├── features.py
-    ├── train.py
-    └── predict.py
-```
+## 입력 데이터
 
-## 3. 실행
+기본 CSV 위치는 `data/`입니다.
+
+| 파일 | 필수 주요 컬럼 |
+|---|---|
+| `potholes.csv` | `event_date`, `lat`, `lon` |
+| `repairs.csv` | `repair_date`, `lat`, `lon` |
+| `roads.csv` | `lat`, `lon` |
+| `weather_history.csv` | `date`, `station_id`, `lat`, `lon`, 기온·강수 컬럼 |
+| `weather_forecast.csv` | 위와 동일 |
+
+`roads.csv`에 `traffic_volume` 또는 `road_importance` 숫자 컬럼이 있으면 자동으로 모델과 우선순위에 반영됩니다. 없으면 관련 가중치를 자동 재정규화합니다.
+
+### 학습 feature
+
+- 격자 중심 위도·경도
+- 최근 3일/7일 누적강수
+- 최근 7일 동결·융해 횟수
+- 과거 90일 포트홀 수와 전체 누적 포트홀 수
+- `has_repair_history`
+- `days_since_last_repair`
+- 선택: 교통량, 도로중요도
+
+보수이력이 없는 격자는 `has_repair_history=0`, `days_since_last_repair=0`으로 둡니다. 0일을 “방금 보수함”으로 오해하지 않도록 두 feature를 항상 함께 학습시킵니다.
+
+## 설치와 실행
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
+```
 
-# 샘플 데이터 생성
-python scripts/make_sample_data.py
+모델 학습과 예측:
 
-# 모델 학습
+```bash
 python -m src.train --config config.yaml
-
-# 최신 위험도 예측
 python -m src.predict --config config.yaml
+```
 
-# 화면 실행
+특정 날짜를 예측하려면:
+
+```bash
+python -m src.predict --config config.yaml --date 2026-01-03
+```
+
+대시보드 실행:
+
+```bash
 streamlit run app.py
 ```
 
-## 4. 실제 데이터 CSV 형식
+## 카카오 지도 설정
 
-### `data/potholes.csv`
+프로젝트 루트의 `.env`에 카카오 디벨로퍼스 **JavaScript 키**와 **REST API 키**를 입력합니다.
 
-| 컬럼 | 설명 |
-|---|---|
-| event_id | 민원 또는 포트홀 ID |
-| event_date | 신고일 또는 발견일, `YYYY-MM-DD` |
-| lat | 위도 |
-| lon | 경도 |
-| severity | 심각도, 없으면 1 |
-| road_name | 도로명, 선택 |
-
-### `data/repairs.csv`
-
-| 컬럼 | 설명 |
-|---|---|
-| repair_id | 보수 ID |
-| repair_date | 보수일 |
-| lat | 위도 |
-| lon | 경도 |
-| repair_type | 보수 방식, 선택 |
-
-### `data/roads.csv`
-
-전북 도로 위의 점들을 100~250m 간격으로 샘플링한 파일입니다.
-
-| 컬럼 | 설명 |
-|---|---|
-| road_point_id | 점 ID |
-| lat | 위도 |
-| lon | 경도 |
-| road_name | 도로명, 선택 |
-
-SHP만 있을 경우 아래 명령으로 변환합니다.
-
-```bash
-python scripts/shp_to_road_points.py \
-  --input /path/to/road.shp \
-  --output data/roads.csv \
-  --spacing-m 200
+```dotenv
+KAKAO_MAP_APP_KEY=발급받은_JavaScript_키
+KAKAO_REST_API_KEY=발급받은_REST_API_키
 ```
 
-### `data/weather_history.csv`
+JavaScript 키는 지도 표시, REST API 키는 주소·장소 검색과 자동차 길찾기에 사용합니다. REST 키는 Streamlit 서버에서만 요청 헤더에 넣고 브라우저 컴포넌트에는 전달하지 않습니다.
 
-| 컬럼 | 설명 |
-|---|---|
-| date | 관측일 |
-| station_id | 관측소 ID |
-| station_name | 관측소명 |
-| lat | 관측소 위도 |
-| lon | 관측소 경도 |
-| avg_temp | 평균기온 |
-| min_temp | 최저기온 |
-| max_temp | 최고기온 |
-| precipitation | 일강수량 mm |
-| snowfall | 일적설량 cm, 없으면 0 |
-| humidity | 평균습도 %, 없으면 결측 허용 |
+카카오 디벨로퍼스 앱 설정에서 실행 주소도 Web 플랫폼 사이트 도메인으로 등록해야 합니다. 로컬 실행 기본 주소는 보통 `http://localhost:8501`입니다. `.env`는 Git에서 제외되며, 공유용 형식은 `.env.example`에 있습니다.
 
-### `data/weather_forecast.csv`
+## 포트홀 위험 회피 경로
 
-형식은 `weather_history.csv`와 동일하며, 미래 날짜의 예보값을 넣습니다.
+1. 출발지와 도착지를 주소 또는 장소명으로 입력합니다.
+2. 카카오 자동차 길찾기의 추천·최단시간·최단거리 및 대안 경로를 최대 3개 수집합니다.
+3. 경로를 약 150m 간격으로 표본화하고 500m 위험 격자 중심과 360m 이내인지 계산합니다.
+4. 기본 경로에 `높음` 또는 `매우 높음` 격자가 있으면, 예상 시간이 기본 경로 대비 30% 이내인 후보 중 위험 노출이 낮은 우회 경로를 추천합니다.
+5. 추천 경로는 초록색, 기본 경로는 주황색, 다른 대안은 회색으로 지도에 표시합니다.
 
-## 5. 실제 데이터 연결 시 수정할 부분
+위험 회피 결과는 포트홀 예측 격자와의 공간적 근접도를 이용한 해커톤용 의사결정 보조값입니다. 실제 도로 통제나 안전 운행 지시를 대체하지 않습니다.
 
-공공데이터 API 응답 컬럼을 위 CSV 형식으로 한 번만 변환하면 나머지 코드는 그대로 쓸 수 있습니다. 해커톤에서는 API를 매번 직접 호출하기보다, 먼저 CSV로 저장한 뒤 모델을 돌리는 방식이 안정적입니다.
+## 우선순위 산식
 
-## 6. 모델 출력
+교통량 또는 도로중요도가 있는 경우:
 
-`outputs/predictions.csv`
+```text
+priority_score = risk_score × 0.75
+               + recurrence_score × 0.15
+               + importance_score × 0.10
+```
 
-| 컬럼 | 설명 |
-|---|---|
-| prediction_date | 예측 대상일 |
-| grid_id | 500m 격자 ID |
-| grid_lat | 격자 중심 위도 |
-| grid_lon | 격자 중심 경도 |
-| risk_score | 포트홀 위험도 0~1 |
-| risk_level | 낮음/보통/높음/매우 높음 |
-| risk_reason | 주요 위험 요인 |
-| priority_rank | 보수 우선순위 |
+둘 다 없으면 0.10을 버리지 않고 남은 항목에 재정규화합니다.
 
-## 7. 발표 시 표현
+```text
+priority_score = risk_score × 0.8333...
+               + recurrence_score × 0.1666...
+```
 
-데이터가 민원 중심이면 “포트홀 실제 발생 확률”보다는 아래처럼 표현하는 게 안전합니다.
+`priority_rank`는 이 별도 점수를 기준으로 결정하므로 단순 `risk_score` 정렬과 다릅니다.
 
-> 과거 포트홀 민원·보수 이력과 기상정보를 결합한 전북 도로 구간별 상대 위험도 예측
+## 산출물
+
+- `models/road_doctor_v2.joblib`: 모델, feature 목록, 전처리 기준, 분류 임계값
+- `outputs/metrics_v2.json`: split 정보, 클래스 불균형 값, validation/test 지표
+- `outputs/feature_importance_v2.csv`: 모델 feature 중요도
+- `outputs/predictions_v2.csv`: 최종 격자별 예측
+
+주요 예측 CSV 컬럼:
+
+```text
+prediction_date, grid_id, grid_lat, grid_lon,
+risk_score, risk_percentile, risk_level, predicted_label, risk_reason,
+priority_score, priority_rank, recurrence_score, importance_score,
+priority_weight_risk, priority_weight_recurrence, priority_weight_importance,
+precip_3d, precip_7d, freeze_thaw_7d,
+past_potholes_90d, past_potholes_total,
+has_repair_history, days_since_last_repair
+```
+
+## 테스트
+
+```bash
+python -m unittest discover -s tests -v
+```

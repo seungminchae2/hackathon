@@ -1,0 +1,48 @@
+{
+  "schema_version": "2.0",
+  "trained_at_utc": "2026-08-16T11:23:10.874928+00:00",
+  "target": "기준일 다음 30일 내 포트홀 발생 여부",
+  "features": [
+    "grid_lat",
+    "grid_lon",
+    "precip_3d",
+    "precip_7d",
+    "freeze_thaw_7d",
+    "past_potholes_90d",
+    "past_potholes_total",
+    "has_repair_history",
+    "days_since_last_repair"
+  ],
+  "split": {
+    "validation_start": "2025-03-31",
+    "test_start": "2025-07-14",
+    "train_rows": 276185,
+    "validation_rows": 63735,
+    "test_rows": 85587
+  },
+  "class_imbalance": {
+    "train_positive": 1823,
+    "train_negative": 274362,
+    "scale_pos_weight": 150.50027427317607
+  },
+  "metrics": {
+    "validation": {
+      "roc_auc": 0.5459286213288086,
+      "pr_auc": 0.0050358501875592,
+      "f1": 0.04103967168262654,
+      "threshold": 0.4956061542034149,
+      "positive_rate": 0.002714364164117047
+    },
+    "test": {
+      "roc_auc": 0.5883720654212263,
+      "pr_auc": 0.007601763837037432,
+      "f1": 0.004885993485342019,
+      "threshold": 0.4956061542034149,
+      "positive_rate": 0.006017268977765315
+    }
+  },
+  "notes": [
+    "F1 임계값은 validation에서 선택하고 test에는 그대로 적용했습니다.",
+    "risk_score는 순위화를 위한 모델 점수이며 별도 확률 보정 전에는 절대 발생확률로 해석하지 않습니다."
+  ]
+}
