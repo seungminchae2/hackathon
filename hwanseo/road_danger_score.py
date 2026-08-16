@@ -3,33 +3,12 @@ import numpy as np
 from pathlib import Path
 
 
+ROADS_FILE = Path("data/roads_with_sewer_age.csv")
 TRAFFIC_FILE = Path("data/전북국도교통량(상시조사교통량).csv")
 WEATHER_FILE = Path("data/weather_history.csv")
-SEWER_FILE = Path("data/전북5개시_하수관로_노후도.xlsx")
 
 OUTPUT_ALL = Path("data/road_risk_all_dates.csv")
 OUTPUT_LATEST = Path("data/road_risk_latest.csv")
-
-
-# ============================================================
-# ESAL 계수
-#
-# ESAL(Equivalent Single Axle Load)은 서로 다른 차량의
-# 도로 포장에 대한 반복하중 영향을 표준 축하중으로 환산하는 개념이다.
-#
-# 단순 차량 대수보다 대형차량이 포장에 미치는 영향을
-# 더 크게 반영하기 위해 사용한다.
-#
-# 아래 값은 기존 프로젝트에서 사용한 ESAL 계수를 그대로 사용한다.
-# ============================================================
-
-ESAL_FACTORS = {
-    "승용차": 0.0002,
-    "버스": 0.852,
-    "소형화물": 0.004,
-    "중형화물": 1.735,
-    "대형화물": 3.169,
-}
 
 
 TARGET_CITIES = [
@@ -42,7 +21,28 @@ TARGET_CITIES = [
 
 
 # ============================================================
-# CSV 인코딩 자동 판별
+# ESAL 계수
+#
+# ESAL은 서로 다른 차량 종류가 도로 포장에 미치는
+# 반복하중 영향을 표준 축하중으로 환산하기 위한 지표이다.
+#
+# 단순 교통량보다 중형·대형 화물차가 도로에 주는
+# 상대적으로 큰 하중을 반영하기 위해 사용한다.
+#
+# 아래 계수는 기존 프로젝트에서 사용한 값을 그대로 유지한다.
+# ============================================================
+
+ESAL_FACTORS = {
+    "승용차": 0.0002,
+    "버스": 0.852,
+    "소형화물": 0.004,
+    "중형화물": 1.735,
+    "대형화물": 3.169,
+}
+
+
+# ============================================================
+# 공통 함수
 # ============================================================
 
 def read_csv_auto_encoding(path, **kwargs):
@@ -73,20 +73,6 @@ def read_csv_auto_encoding(path, **kwargs):
     raise last_error
 
 
-# ============================================================
-# 숫자형 데이터 정리
-#
-# CSV에
-#
-# 23,142
-#
-# 같은 형태로 저장된 값을
-#
-# 23142
-#
-# 숫자로 변환한다.
-# ============================================================
-
 def clean_number(series):
 
     return pd.to_numeric(
@@ -97,10 +83,6 @@ def clean_number(series):
         errors="coerce"
     ).fillna(0)
 
-
-# ============================================================
-# Min-Max 0~100 점수화
-# ============================================================
 
 def minmax_score(series):
 
@@ -129,10 +111,6 @@ def minmax_score(series):
     )
 
 
-# ============================================================
-# 임계값 사이를 선형적으로 0~100 점수화
-# ============================================================
-
 def piecewise_score(
     value,
     thresholds,
@@ -153,49 +131,135 @@ def piecewise_score(
 
 
 # ============================================================
-# 구간명에서 대상 도시 찾기
+# 1. 도로 포인트 + 하수관로 데이터
+#
+# merge_sewer_age.py 결과물을 직접 사용한다.
+#
+# 이 파일에는 680개 도로 포인트가 있고:
+#
+# road_name
+# city
+# lat
+# lon
+# sewer_old30_ratio
+# average_sewer_age
+#
+# 등의 컬럼이 들어있다.
+#
+# 따라서 기존처럼 하수관로 엑셀을 road_danger_score.py에서
+# 다시 읽어서 merge하지 않는다.
+# ============================================================
+
+roads = read_csv_auto_encoding(
+    ROADS_FILE
+)
+
+
+required_road_columns = [
+    "road_name",
+    "city",
+    "lat",
+    "lon",
+    "sewer_old30_ratio",
+]
+
+
+missing = [
+    col
+    for col in required_road_columns
+    if col not in roads.columns
+]
+
+
+if missing:
+
+    raise ValueError(
+        f"roads_with_sewer_age.csv에 필요한 컬럼이 없습니다: {missing}\n"
+        f"현재 컬럼: {roads.columns.tolist()}"
+    )
+
+
+roads["lat"] = pd.to_numeric(
+    roads["lat"],
+    errors="coerce"
+)
+
+
+roads["lon"] = pd.to_numeric(
+    roads["lon"],
+    errors="coerce"
+)
+
+
+roads["sewer_old30_ratio"] = pd.to_numeric(
+    roads["sewer_old30_ratio"],
+    errors="coerce"
+)
+
+
+# ============================================================
+# 하수관로 노후도 점수
+#
+# sewer_old30_ratio는 0~1 비율이다.
 #
 # 예:
 #
-# 정읍시-태인면
-# → 정읍시
+# 0.762
+# → 30년 이상 노후관 비율 약 76.2%
+# → sewer_score = 76.2점
 #
-# 김제IC-전주시
-# → 전주시
+# 노후관 비율 자체가 이미 0~100%라는 의미를 가진 값이므로
+# 다른 도시와 Min-Max 정규화하지 않고 그대로 사용한다.
 #
-# 전주시-익산시
-# → 전주시 + 익산시
+# 즉:
+#
+# 0%   → 0점
+# 50%  → 50점
+# 100% → 100점
 # ============================================================
 
-def extract_target_cities(section_name):
+roads["sewer_score"] = (
+    roads["sewer_old30_ratio"]
+    * 100
+).clip(
+    0,
+    100
+)
 
-    if pd.isna(section_name):
 
-        return []
+# 각 포인트 고유 ID
+roads = roads.reset_index(
+    drop=True
+)
 
-    section_name = str(section_name)
 
-    cities = [
-        city
-        for city in TARGET_CITIES
-        if city in section_name
-    ]
+roads["point_id"] = (
+    np.arange(
+        len(roads)
+    )
+)
 
-    return cities
+
+print(
+    "도로 포인트 수:",
+    len(roads)
+)
+
+
+print(
+    "하수관로 매칭 성공:",
+    roads["sewer_old30_ratio"]
+    .notna()
+    .sum()
+)
 
 
 # ============================================================
-# 실제 교통량 CSV 읽기
+# 2. 교통량 CSV 읽기
 #
-# 현재 파일은 2단 헤더 구조이다.
+# 실제 교통량 파일은 2단 헤더 구조이다.
 #
-# 1행:
-# 노선명 / 구간명 / AADT / 평균교통량 / 주말교통량
-#
-# 2행:
-# 승용차 / 버스 / 소형화물 / 중형화물 / 대형화물 ...
-#
-# 따라서 처음 두 행을 제외하고 실제 데이터를 읽는다.
+# 첫 두 줄을 제외하고 실제 데이터를 사용한다.
 # ============================================================
 
 def read_traffic_file(path):
@@ -204,13 +268,6 @@ def read_traffic_file(path):
         path,
         header=None
     )
-
-    if raw.shape[1] < 17:
-
-        raise ValueError(
-            "교통량 CSV의 컬럼 수가 예상보다 적습니다.\n"
-            f"현재 컬럼 수: {raw.shape[1]}"
-        )
 
     traffic = raw.iloc[
         2:,
@@ -241,33 +298,20 @@ def read_traffic_file(path):
         traffic["구간명"].notna()
     ].copy()
 
-    # GitHub 화면에서 국도1호선처럼 첫 행에만 노선명이 있고
-    # 아래 행은 빈칸인 구조이므로 이전 값을 아래로 채운다.
     traffic["노선명"] = (
         traffic["노선명"]
         .replace("", np.nan)
         .ffill()
     )
 
-    numeric_columns = [
+    for col in [
         "AADT",
         "승용차",
         "버스",
         "소형화물",
         "중형화물",
         "대형화물",
-        "평균교통량_계",
-        "평균교통량_비율",
-        "주말_승용차",
-        "주말_버스",
-        "주말_소형화물",
-        "주말_중형화물",
-        "주말_대형화물",
-        "주말교통량_계",
-        "주말교통량_비율",
-    ]
-
-    for col in numeric_columns:
+    ]:
 
         traffic[col] = clean_number(
             traffic[col]
@@ -276,54 +320,63 @@ def read_traffic_file(path):
     return traffic
 
 
-# ============================================================
-# 교통량 데이터
-# ============================================================
-
 traffic = read_traffic_file(
     TRAFFIC_FILE
 )
 
 
-# 구간명에서 대상 도시 추출
-traffic["cities"] = (
+# ============================================================
+# 교통량 구간 → 도시 매핑
+#
+# 구간명에 도시 이름이 직접 들어가는 경우 우선 사용한다.
+#
+# 추가로 이전 확인에서 행정구역상 5개시에 포함되는 것으로
+# 확인된 구간을 수동 매핑한다.
+# ============================================================
+
+MANUAL_CITY_MAP = {
+    "대강면-동계면(1317-00)": "남원시",
+    "식정동-장수읍(1909-05)": "남원시",
+    "정읍IC-흥덕면(2202-01)": "정읍시",
+    "김제시-대야면(2912-01)": "군산시",
+    "개정면-성산면(2914-00)": "군산시",
+}
+
+
+def get_traffic_city(section):
+
+    if pd.isna(section):
+
+        return None
+
+    text = str(section)
+
+    for city in TARGET_CITIES:
+
+        if city in text:
+
+            return city
+
+    return MANUAL_CITY_MAP.get(
+        text
+    )
+
+
+traffic["city"] = (
     traffic["구간명"]
-    .apply(extract_target_cities)
+    .apply(
+        get_traffic_city
+    )
 )
 
 
-# 전북 5개시 중 하나라도 포함된 구간만 사용
 traffic = traffic[
-    traffic["cities"].str.len() > 0
+    traffic["city"].notna()
 ].copy()
-
-
-# 전주시-익산시처럼 도시가 두 개인 경우
-# 각각의 도시 조건을 계산할 수 있도록 행을 분리
-traffic = traffic.explode(
-    "cities"
-)
-
-
-traffic = traffic.rename(
-    columns={
-        "cities": "city"
-    }
-)
-
-
-# 각 도로를 구분하기 위한 ID
-traffic["road_id"] = (
-    traffic["노선명"].astype(str)
-    + "|"
-    + traffic["구간명"].astype(str)
-)
 
 
 # ============================================================
 # ESAL 계산
-#
-# 단순 교통량 대신 차량별 도로하중을 반영한다.
 # ============================================================
 
 for vehicle, factor in ESAL_FACTORS.items():
@@ -374,110 +427,64 @@ traffic["heavy_vehicle_ratio"] = (
 
 
 # ============================================================
-# ESAL 위험점수
+# 현재 교통량 데이터에는 각 조사구간의 실제 선형 좌표가 없다.
 #
-# ESAL 값은 도로별 편차가 매우 클 수 있기 때문에
-# log1p 변환 후 0~100점으로 정규화한다.
+# 따라서 680개 포인트와 정확한 최근접 공간매칭은
+# 현재 파일만으로 수행할 수 없다.
 #
-# log 변환 및 Min-Max 점수화 자체는 공식 정부 위험식이 아니라
-# 특정 도로의 극단적인 ESAL 값이 전체 점수를 지배하지 않도록
-# 하기 위한 프로젝트 데이터 처리 방식이다.
+# 임시로 각 도시의 교통량 구간 ESAL 중앙값을 사용한다.
+#
+# 평균보다 중앙값을 사용하는 이유:
+# 한 개의 초고교통량 도로가 도시 전체 포인트의
+# 교통량 위험도를 과도하게 높이는 것을 줄이기 위함이다.
+#
+# 이 값은 향후 교통량 조사구간의 좌표/geometry 확보 시
+# 포인트별 nearest spatial join으로 교체하는 것이 바람직하다.
 # ============================================================
 
-traffic["traffic_score"] = minmax_score(
-    np.log1p(
-        traffic["traffic_esal"]
+city_traffic = (
+    traffic
+    .groupby(
+        "city",
+        as_index=False
+    )
+    .agg(
+        traffic_esal=(
+            "traffic_esal",
+            "median"
+        ),
+        total_traffic=(
+            "total_traffic",
+            "median"
+        ),
+        heavy_vehicle_ratio=(
+            "heavy_vehicle_ratio",
+            "median"
+        )
     )
 )
 
 
-# ============================================================
-# 하수관로 노후도
-#
-# 전북 5개시 하수관로 엑셀의
-# '노후도_요약' 시트를 사용한다.
-#
-# 노후관 비율 자체가 0~100%라는 해석 가능한 척도이므로
-# Min-Max 정규화하지 않고 그대로 위험점수로 사용한다.
-# ============================================================
-
-sewer = pd.read_excel(
-    SEWER_FILE,
-    sheet_name="노후도_요약",
-    header=3
-)
-
-
-sewer = sewer.iloc[
-    :,
-    :5
-].copy()
-
-
-sewer.columns = [
-    "city",
-    "total_sewer_length",
-    "old_sewer_length",
-    "old_sewer_ratio",
-    "average_sewer_age",
-]
-
-
-sewer = sewer[
-    sewer["city"].isin(
-        TARGET_CITIES
+city_traffic["traffic_score"] = (
+    minmax_score(
+        np.log1p(
+            city_traffic[
+                "traffic_esal"
+            ]
+        )
     )
-].copy()
-
-
-sewer[
-    "old_sewer_ratio"
-] = pd.to_numeric(
-    sewer[
-        "old_sewer_ratio"
-    ],
-    errors="coerce"
 )
 
 
-sewer["sewer_score"] = (
-    sewer["old_sewer_ratio"]
-    * 100
-).clip(
-    0,
-    100
-)
-
-
-# 교통량 데이터에 하수관로 정보 연결
-traffic = traffic.merge(
-    sewer[
-        [
-            "city",
-            "total_sewer_length",
-            "old_sewer_length",
-            "old_sewer_ratio",
-            "average_sewer_age",
-            "sewer_score",
-        ]
-    ],
+roads = roads.merge(
+    city_traffic,
     on="city",
     how="left"
 )
 
 
 # ============================================================
-# 날씨 데이터
-#
-# 실제 파일:
-# data/weather_history.csv
-#
-# 주요 컬럼:
-# date
-# station_name
-# min_temp
-# max_temp
-# precipitation
+# 3. 날씨 데이터
 # ============================================================
 
 weather = read_csv_auto_encoding(
@@ -511,26 +518,17 @@ weather = weather.sort_values(
 
 
 # ============================================================
-# 동결융해 판정
+# 4. 동결융해
 #
-# [근거]
+# 하루 최저기온 <= 0℃
+# AND
+# 하루 최고기온 > 0℃
 #
-# 물의 상변화는 0℃ 부근에서 발생한다.
-#
-# 따라서
-#
-# 최저기온 <= 0℃
-# 최고기온 > 0℃
-#
-# 이면 하루 동안 0℃ 경계를 통과했다고 보고
+# 이면 하루 동안 0℃ 경계를 통과한 것으로 보고
 # 동결융해 가능일로 판정한다.
 #
-# FHWA의 LTPP 등 포장 연구에서도 freeze-thaw는
-# 포장 성능에 영향을 주는 환경요인으로 다뤄진다.
-#
-# 실제 포장 내부 온도를 측정하는 것이 가장 정확하지만
-# 현재 프로젝트에는 대기온도 자료가 있으므로
-# 최저/최고기온을 동결융해 proxy로 사용한다.
+# 실제 포장 내부 온도가 아닌 대기온도를 사용하는
+# proxy 지표라는 한계가 있다.
 # ============================================================
 
 weather["freeze_thaw"] = (
@@ -546,7 +544,6 @@ weather["freeze_thaw"] = (
 ).astype(int)
 
 
-# 최근 14일 동결융해 발생일 수
 weather[
     "freeze_thaw_14d"
 ] = (
@@ -567,9 +564,7 @@ weather[
 
 
 # ============================================================
-# 동결융해 점수
-#
-# 최근 14일:
+# 최근 14일 동결융해 점수
 #
 # 0회       → 0점
 # 1~2회     → 20점
@@ -578,11 +573,11 @@ weather[
 # 7~9회     → 80점
 # 10회 이상 → 100점
 #
-# 반복 동결융해가 포장재 열화를 증가시킨다는 연구 근거는 있지만
-# 위의 정확한 점수 구간은 정부 공식 포트홀 위험등급이 아니다.
+# 동결융해 반복이 포장 열화에 영향을 준다는 문헌적 근거를
+# 바탕으로 반복 횟수가 많을수록 위험도를 높인다.
 #
-# 반복 횟수가 증가할수록 위험을 단계적으로 높이기 위한
-# 본 프로젝트의 engineering heuristic이다.
+# 정확한 20점 간격은 정부 공식 위험등급이 아니라
+# 프로젝트의 engineering heuristic이다.
 # ============================================================
 
 def calculate_freeze_score(count):
@@ -618,18 +613,7 @@ weather[
 
 
 # ============================================================
-# 7일 / 14일 누적강수
-#
-# 수분이 포장 내부로 침투하면 기층 및 노상의 강도와
-# 지지력이 감소할 수 있고, 교통하중 및 동결융해와 결합하면
-# 포장손상 위험이 증가할 수 있다.
-#
-# 하루 강수량만 보는 대신
-#
-# 최근 7일 = 단기간 수분 유입
-# 최근 14일 = 지속적인 습윤 상태
-#
-# 를 함께 사용한다.
+# 5. 누적강수
 # ============================================================
 
 weather["rain_7d"] = (
@@ -667,43 +651,26 @@ weather["rain_14d"] = (
 
 
 # ============================================================
-# 강수량 위험점수
+# 강수 위험 임계값
 #
-# 포트홀에 대해
-# "7일 누적강수 XXmm 이상이면 위험"
-# 같은 전국 공통 공식 절대 임계값은 확인되지 않았다.
+# 전북 5개시 2024~2025 자료의 6~9월 누적강수 분위수 기반.
 #
-# 따라서 임의의 100mm/150mm를 사용하지 않고
-# 프로젝트의 전북 5개시 2024~2025 기상자료에서
-# 6~9월 누적강수량 분포를 이용했다.
+# 7일:
+# P50 = 16.98
+# P75 = 30.05
+# P90 = 41.94
+# P95 = 50.95
+# P99 = 64.81
 #
-# 7일 누적강수:
+# 14일:
+# P50 = 38.74
+# P75 = 55.03
+# P90 = 73.21
+# P95 = 82.47
+# P99 = 98.25
 #
-# P50 = 약 16.98mm
-# P75 = 약 30.05mm
-# P90 = 약 41.94mm
-# P95 = 약 50.95mm
-# P99 = 약 64.81mm
-#
-# 14일 누적강수:
-#
-# P50 = 약 38.74mm
-# P75 = 약 55.03mm
-# P90 = 약 73.21mm
-# P95 = 약 82.47mm
-# P99 = 약 98.25mm
-#
-# 점수:
-#
-# 0   → 0점
-# P50 → 20점
-# P75 → 40점
-# P90 → 60점
-# P95 → 80점
-# P99 → 100점
-#
-# 따라서 100점은 전북 실제 강수분포의
-# 상위 약 1% 수준을 의미한다.
+# P50/P75/P90/P95/P99를
+# 각각 20/40/60/80/100점으로 대응한다.
 # ============================================================
 
 RAIN7_THRESHOLDS = [
@@ -739,9 +706,7 @@ RAIN_SCORES = [
 weather[
     "rain_7d_score"
 ] = (
-    weather[
-        "rain_7d"
-    ]
+    weather["rain_7d"]
     .apply(
         lambda x:
         piecewise_score(
@@ -756,9 +721,7 @@ weather[
 weather[
     "rain_14d_score"
 ] = (
-    weather[
-        "rain_14d"
-    ]
+    weather["rain_14d"]
     .apply(
         lambda x:
         piecewise_score(
@@ -770,26 +733,8 @@ weather[
 )
 
 
-# ============================================================
-# 최종 강수 점수
-#
-# 7일과 14일 점수의 평균이 아니라 높은 값을 사용한다.
-#
-# 7일 고강수:
-# 단기간 집중적인 수분 유입
-#
-# 14일 고강수:
-# 장기간 지속적인 습윤 상태
-#
-# 둘 중 하나가 심한 경우 평균으로 위험이 희석되는 것을
-# 방지하기 위해 max 값을 사용한다.
-#
-# max 방식은 공식 정부식이 아니라 본 모델의 설계 방식이다.
-# ============================================================
-
-weather[
-    "rain_score"
-] = (
+# 7일 또는 14일 중 높은 위험을 사용한다.
+weather["rain_score"] = (
     weather[
         [
             "rain_7d_score",
@@ -803,7 +748,7 @@ weather[
 
 
 # ============================================================
-# 날씨 관측소 → 시군 연결
+# 기상관측소 → 시 연결
 # ============================================================
 
 CITY_MAP = {
@@ -831,10 +776,10 @@ weather = weather[
 
 
 # ============================================================
-# 교통량 + 하수관 + 날씨 결합
+# 6. 680개 도로 포인트 + 날씨
 # ============================================================
 
-risk = traffic.merge(
+risk = roads.merge(
     weather[
         [
             "date",
@@ -858,38 +803,34 @@ risk = traffic.merge(
 
 
 # ============================================================
-# 계절별 가중치
+# 7. 계절별 가중치
 #
-# 겨울 및 해빙기: 11~4월
+# 겨울/해빙기 11~4월:
 #
 # 동결융해 35%
 # 강수     15%
 # 하수관   25%
-# ESAL     25%
+# 교통     25%
 #
-# 장마 및 여름철: 6~9월
+#
+# 장마/여름철 6~9월:
 #
 # 동결융해 5%
 # 강수     45%
 # 하수관   25%
-# ESAL     25%
+# 교통     25%
 #
-# 전환기: 5월, 10월
+#
+# 5월/10월:
 #
 # 동결융해 15%
 # 강수     35%
 # 하수관   25%
-# ESAL     25%
+# 교통     25%
 #
-# 동결융해와 수분이 포장 성능에 영향을 준다는 것은
-# 포장공학적 근거가 있다.
 #
-# 다만 정확히 35%, 45%, 25%라는 수치는
-# 정부 또는 FHWA의 공식 포트홀 가중치가 아니다.
-#
-# 현재 실제 포트홀 발생 라벨을 이용해 통계적으로 학습한
-# 계수가 없으므로 계절별 손상 메커니즘을 반영한
-# 규칙 기반 가중치로 사용한다.
+# 환경요인의 계절적 메커니즘을 반영한 규칙 기반 가중치이며
+# 공식 정부 포트홀 가중치는 아니다.
 # ============================================================
 
 def get_weights(month):
@@ -933,17 +874,13 @@ def get_weights(month):
 
 
 risk["month"] = (
-    risk[
-        "date"
-    ]
+    risk["date"]
     .dt.month
 )
 
 
 weights = (
-    risk[
-        "month"
-    ]
+    risk["month"]
     .apply(
         get_weights
     )
@@ -964,132 +901,71 @@ risk[
 
 
 # ============================================================
-# 각 요인의 최종 위험도 기여점수
+# 8. 각 요인의 기여점수
 # ============================================================
 
 risk[
     "freeze_contribution"
 ] = (
-    risk[
-        "freeze_score"
-    ]
-    * risk[
-        "freeze_weight"
-    ]
+    risk["freeze_score"]
+    * risk["freeze_weight"]
 )
 
 
 risk[
     "rain_contribution"
 ] = (
-    risk[
-        "rain_score"
-    ]
-    * risk[
-        "rain_weight"
-    ]
+    risk["rain_score"]
+    * risk["rain_weight"]
 )
 
 
 risk[
     "sewer_contribution"
 ] = (
-    risk[
-        "sewer_score"
-    ]
-    * risk[
-        "sewer_weight"
-    ]
+    risk["sewer_score"]
+    * risk["sewer_weight"]
 )
 
 
 risk[
     "traffic_contribution"
 ] = (
-    risk[
-        "traffic_score"
-    ]
-    * risk[
-        "traffic_weight"
-    ]
+    risk["traffic_score"]
+    * risk["traffic_weight"]
 )
 
-
-# ============================================================
-# 기본 위험도
-# ============================================================
 
 risk[
     "base_risk_score"
 ] = (
-    risk[
-        "freeze_contribution"
-    ]
-    +
-    risk[
-        "rain_contribution"
-    ]
-    +
-    risk[
-        "sewer_contribution"
-    ]
-    +
-    risk[
-        "traffic_contribution"
-    ]
+    risk["freeze_contribution"]
+    + risk["rain_contribution"]
+    + risk["sewer_contribution"]
+    + risk["traffic_contribution"]
 )
 
 
 # ============================================================
-# 동결융해 × 강수 복합위험
-#
-# 수분이 많은 상태에서 동결융해가 반복되면
-# 포장손상이 더욱 심해질 가능성이 있으므로
-#
-# freeze_score >= 60
-# rain_score >= 60
-#
-# 을 동시에 만족하면 추가 10점.
-#
-# +10점은 공식 정부 기준이 아니라
-# 복합위험을 반영하기 위한 모델링 값이다.
+# 동결융해 × 강수 상호작용
 # ============================================================
 
-risk[
-    "interaction_bonus"
-] = np.where(
+risk["interaction_bonus"] = np.where(
     (
-        risk[
-            "freeze_score"
-        ]
-        >= 60
+        risk["freeze_score"] >= 60
     )
     &
     (
-        risk[
-            "rain_score"
-        ]
-        >= 60
+        risk["rain_score"] >= 60
     ),
     10,
     0
 )
 
 
-# ============================================================
-# 최종 위험점수
-# ============================================================
-
-risk[
-    "risk_score"
-] = (
-    risk[
-        "base_risk_score"
-    ]
-    +
-    risk[
-        "interaction_bonus"
-    ]
+risk["risk_score"] = (
+    risk["base_risk_score"]
+    + risk["interaction_bonus"]
 ).clip(
     0,
     100
@@ -1098,21 +974,10 @@ risk[
 
 # ============================================================
 # 위험등급
-#
-# UI에서 위험도를 쉽게 표현하기 위한 프로젝트 기준.
-#
-# 0~30   안전
-# 30~50  주의
-# 50~70  위험
-# 70~100 매우 위험
-#
-# 정부 공식 포트홀 위험등급은 아니다.
 # ============================================================
 
 risk["risk_level"] = pd.cut(
-    risk[
-        "risk_score"
-    ],
+    risk["risk_score"],
     bins=[
         -1,
         30,
@@ -1130,19 +995,13 @@ risk["risk_level"] = pd.cut(
 
 
 # ============================================================
-# 가장 크게 기여한 위험요인
-#
-# 지도에서
-#
-# "이 도로가 왜 위험한가?"
-#
-# 를 설명하기 위한 컬럼이다.
+# 9. 주요 위험요인
 # ============================================================
 
 contribution_columns = {
     "freeze_contribution": "동결융해",
     "rain_contribution": "누적강수",
-    "sewer_contribution": "하수관로 노후",
+    "sewer_contribution": "하수관로 노후도",
     "traffic_contribution": "교통하중",
 }
 
@@ -1165,44 +1024,42 @@ risk[
 
 
 # ============================================================
-# 도시 경계구간 처리
+# 10. risk_reason
 #
-# 예:
+# 기존 결과에서 risk_reason에 하수관로가 표시되지 않는
+# 문제가 있었으므로 모든 핵심 피처를 명시한다.
 #
-# 전주시-익산시
-#
-# 같은 구간은 전주시 조건과 익산시 조건을 각각 계산한다.
-#
-# 두 위험도의 평균을 내면 한쪽 도시가 매우 위험한 상황이
-# 희석될 수 있으므로 도로 점검 우선순위 관점에서
-# 높은 위험도를 대표값으로 사용한다.
+# 따라서 하수관로가 1순위 원인이 아니더라도
+# sewer_old30_ratio / sewer_score가 항상 결과에 남는다.
 # ============================================================
 
-risk = risk.sort_values(
-    [
-        "road_id",
-        "date",
-        "risk_score",
-    ],
-    ascending=[
-        True,
-        True,
-        False,
-    ]
-)
+def make_risk_reason(row):
+
+    return (
+        f"주요원인={row['main_risk_factor']} | "
+        f"동결융해={row['freeze_score']:.1f}점 "
+        f"(14일 {row['freeze_thaw_14d']:.0f}회) | "
+        f"누적강수={row['rain_score']:.1f}점 "
+        f"(7일 {row['rain_7d']:.1f}mm, "
+        f"14일 {row['rain_14d']:.1f}mm) | "
+        f"하수관로 노후도={row['sewer_score']:.1f}점 "
+        f"(30년 이상 비율 "
+        f"{row['sewer_old30_ratio'] * 100:.1f}%) | "
+        f"교통하중={row['traffic_score']:.1f}점 "
+        f"(ESAL {row['traffic_esal']:.1f})"
+    )
 
 
-risk = risk.drop_duplicates(
-    subset=[
-        "road_id",
-        "date",
-    ],
-    keep="first"
+risk["risk_reason"] = (
+    risk.apply(
+        make_risk_reason,
+        axis=1
+    )
 )
 
 
 # ============================================================
-# 결과 저장
+# 11. 결과 저장
 # ============================================================
 
 OUTPUT_ALL.parent.mkdir(
@@ -1211,7 +1068,6 @@ OUTPUT_ALL.parent.mkdir(
 )
 
 
-# 모든 날짜의 위험도
 risk.to_csv(
     OUTPUT_ALL,
     index=False,
@@ -1219,32 +1075,24 @@ risk.to_csv(
 )
 
 
-# 가장 최근 날짜만 추출
 latest_date = (
-    risk[
-        "date"
-    ]
+    risk["date"]
     .max()
 )
 
 
 latest_risk = (
     risk[
-        risk[
-            "date"
-        ]
+        risk["date"]
         == latest_date
     ]
     .copy()
 )
 
 
-latest_risk = (
-    latest_risk
-    .sort_values(
-        "risk_score",
-        ascending=False
-    )
+latest_risk = latest_risk.sort_values(
+    "risk_score",
+    ascending=False
 )
 
 
@@ -1256,132 +1104,93 @@ latest_risk.to_csv(
 
 
 # ============================================================
-# 실행 결과 확인
+# 12. 결과 검증
 # ============================================================
 
 print(
     "도로 위험도 계산 완료"
 )
 
+
+print(
+    f"도로 포인트 수: {roads['point_id'].nunique()}"
+)
+
+
 print(
     f"전체 날짜 결과: {OUTPUT_ALL}"
 )
+
 
 print(
     f"최신 위험도 결과: {OUTPUT_LATEST}"
 )
 
+
 print(
     f"최신 날씨 날짜: {latest_date.date()}"
 )
 
+
 print(
-    f"분석 대상 도로 구간 수: {latest_risk['road_id'].nunique()}"
-)
-
-
-# ============================================================
-# 대상 5개시와 자동 매칭되지 않은 도로 확인
-#
-# 예:
-#
-# 대강면-동계면
-#
-# 처럼 구간명에 '남원시'라는 글자가 없으면
-# 현재 문자열만으로 남원시라고 판단할 수 없다.
-#
-# 이런 도로를 마지막에 출력하여 추가 매핑 여부를 확인한다.
-# ============================================================
-
-unmatched = read_traffic_file(
-    TRAFFIC_FILE
-)
-
-
-unmatched[
-    "target_city_count"
-] = (
-    unmatched[
-        "구간명"
+    "\n하수관로 결측치:",
+    latest_risk[
+        "sewer_old30_ratio"
     ]
-    .apply(
-        lambda x:
-        len(
-            extract_target_cities(
-                x
-            )
-        )
-    )
+    .isna()
+    .sum()
 )
-
-
-unmatched = unmatched[
-    unmatched[
-        "target_city_count"
-    ]
-    == 0
-]
 
 
 print(
-    "\n전북 5개 대상 시와 매칭되지 않은 구간 수:",
-    len(
-        unmatched
-    )
+    "\n시별 하수관로 노후도"
 )
 
 
-if len(
-    unmatched
-) > 0:
-
-    print(
-        unmatched[
-            [
-                "노선명",
-                "구간명",
-            ]
+print(
+    latest_risk[
+        [
+            "city",
+            "sewer_old30_ratio",
+            "sewer_score",
         ]
-        .head(
-            50
-        )
-        .to_string(
-            index=False
-        )
+    ]
+    .drop_duplicates()
+    .sort_values(
+        "city"
     )
+    .to_string(
+        index=False
+    )
+)
 
 
-# ============================================================
-# 위험도 상위 20개 도로 출력
-# ============================================================
+print(
+    "\n위험도 상위 20개 포인트"
+)
+
 
 display_columns = [
-    "노선명",
-    "구간명",
+    "point_id",
+    "road_name",
     "city",
+    "lat",
+    "lon",
     "date",
-    "AADT",
-    "total_traffic",
-    "heavy_vehicle_ratio",
-    "traffic_esal",
-    "traffic_score",
-    "old_sewer_ratio",
-    "sewer_score",
     "freeze_thaw_14d",
     "freeze_score",
     "rain_7d",
     "rain_14d",
     "rain_score",
-    "interaction_bonus",
+    "sewer_old30_ratio",
+    "sewer_score",
+    "traffic_esal",
+    "traffic_score",
     "risk_score",
     "risk_level",
     "main_risk_factor",
+    "risk_reason",
 ]
-
-
-print(
-    "\n위험도 상위 20개 도로"
-)
 
 
 print(
@@ -1394,4 +1203,36 @@ print(
     .to_string(
         index=False
     )
+)
+
+
+# ============================================================
+# 13. 동일 risk_score 개수 확인
+#
+# 같은 시 내 포인트들이 같은 위험도를 갖는 문제가
+# 얼마나 남아 있는지 확인하기 위한 진단 출력이다.
+# ============================================================
+
+print(
+    "\n시별 서로 다른 risk_score 개수"
+)
+
+
+print(
+    latest_risk
+    .groupby(
+        "city"
+    )[
+        "risk_score"
+    ]
+    .nunique()
+)
+
+
+print(
+    "\n전체 서로 다른 risk_score 개수:",
+    latest_risk[
+        "risk_score"
+    ]
+    .nunique()
 )
