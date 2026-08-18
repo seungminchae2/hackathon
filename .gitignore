@@ -4,3 +4,6 @@ venv/
 *.venv.*/
 hwanseo/
 .env
+__pycache__/
+*.pyc
+example.csv
