@@ -280,11 +280,11 @@
       }];
       clusterer = [
         new kakao.maps.MarkerClusterer({
-          map, markers: clusterMarkers.normal, averageCenter: true, minLevel: 6,
+          map, markers: clusterMarkers.normal, averageCenter: false, gridSize: 100, minLevel: 6,
           disableClickZoom: false, styles: clusterStyle("#fff"),
         }),
         new kakao.maps.MarkerClusterer({
-          map, markers: clusterMarkers.high, averageCenter: true, minLevel: 6,
+          map, markers: clusterMarkers.high, averageCenter: false, gridSize: 100, minLevel: 6,
           disableClickZoom: false, styles: clusterStyle("#ff5c4d"),
         }),
       ];
