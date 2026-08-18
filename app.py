@@ -129,19 +129,27 @@ if pred.empty:
     st.stop()
 
 current_prediction_date = str(pred.get("prediction_date", pd.Series([""])).iloc[0])
-if current_prediction_date != date.today().isoformat() and not st.session_state.get("refreshed_today"):
-    with st.spinner("오늘 날짜 기준으로 예측을 자동 갱신하는 중입니다..."):
-        result = subprocess.run(
-            [sys.executable, str(BASE_DIR / "scripts" / "refresh_daily.py")],
-            cwd=BASE_DIR,
-            capture_output=True,
-            text=True,
-        )
-    st.session_state["refreshed_today"] = True
-    if result.returncode == 0:
-        pred = normalize_predictions(pd.read_csv(prediction_path))
-    else:
-        st.warning("오늘 날짜로 자동 갱신하지 못했습니다. 이전 예측 데이터를 표시합니다.")
+if current_prediction_date != date.today().isoformat():
+    banner_col, button_col = st.columns([5, 1], vertical_alignment="center")
+    banner_col.info(f"예측 기준일이 {current_prediction_date}로 오늘({date.today().isoformat()})보다 오래됐습니다.")
+    if button_col.button("오늘 날짜로 갱신", width="stretch"):
+        with st.spinner("오늘 날짜 기준으로 예측을 갱신하는 중입니다... (몇 분 걸릴 수 있습니다. 이 탭을 닫지 마십시오)"):
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(BASE_DIR / "scripts" / "refresh_daily.py")],
+                    cwd=BASE_DIR,
+                    capture_output=True,
+                    text=True,
+                    timeout=1800,
+                )
+            except subprocess.TimeoutExpired:
+                st.error("갱신이 30분 넘게 걸려 중단했습니다. 터미널에서 `python scripts/refresh_daily.py`를 직접 실행해 보십시오.")
+                st.stop()
+        if result.returncode == 0:
+            st.success("갱신 완료. 최신 데이터를 불러옵니다.")
+            st.rerun()
+        else:
+            st.error("갱신에 실패했습니다. 터미널에서 `python scripts/refresh_daily.py`를 직접 실행해 오류를 확인하십시오.")
 
 pred = attach_road_authority(pred, BASE_DIR / "data" / "road_authorities.csv")
 
