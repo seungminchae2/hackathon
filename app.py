@@ -84,6 +84,9 @@ def normalize_predictions(frame: pd.DataFrame) -> pd.DataFrame:
         out["recurrence_score"] = recurrence.div(scale).clip(upper=1)
     if "importance_score" not in out:
         out["importance_score"] = np.nan
+    if "address" in out.columns:
+        missing_address = out["address"].isna() | out["address"].astype(str).str.strip().eq("")
+        out.loc[missing_address, "address"] = out.loc[missing_address, "grid_id"]
     if "priority_score" not in out:
         out["priority_score"] = (out["risk_score"] * 0.75 + out["recurrence_score"] * 0.15) / 0.90
     out = out.sort_values(

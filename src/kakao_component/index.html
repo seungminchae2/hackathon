@@ -244,7 +244,8 @@
       const avgLon = valid.reduce((s,r) => s + Number(r.grid_lon), 0) / valid.length;
       map = new kakao.maps.Map(document.getElementById("map"), {center:new kakao.maps.LatLng(avgLat,avgLon),level:11});
       map.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
-      const clusterMarkers = [];
+      const HIGH_RISK_LEVELS = new Set(["매우 높음", "높음"]);
+      const clusterMarkers = {high: [], normal: []};
       valid.forEach(r => {
         const size = Math.round(14 + Number(r.risk_score || 0) * 14);
         const color = colors[r.risk_level] || "#3d8b68";
@@ -256,20 +257,23 @@
         });
         kakao.maps.event.addListener(marker, "click", () => selectRow(r.grid_id, false));
         markersById.set(String(r.grid_id), {marker, color, size});
-        clusterMarkers.push(marker);
+        (HIGH_RISK_LEVELS.has(r.risk_level) ? clusterMarkers.high : clusterMarkers.normal).push(marker);
       });
-      clusterer = new kakao.maps.MarkerClusterer({
-        map,
-        markers: clusterMarkers,
-        averageCenter: true,
-        minLevel: 6,
-        disableClickZoom: false,
-        styles: [{
-          width: "40px", height: "40px", lineHeight: "40px",
-          background: "rgba(13,107,79,.85)", color: "#fff",
-          borderRadius: "50%", textAlign: "center", fontWeight: "800", fontSize: "13px",
-        }],
-      });
+      const clusterStyle = textColor => [{
+        width: "40px", height: "40px", lineHeight: "40px",
+        background: "rgba(13,107,79,.85)", color: textColor,
+        borderRadius: "50%", textAlign: "center", fontWeight: "800", fontSize: "13px",
+      }];
+      clusterer = [
+        new kakao.maps.MarkerClusterer({
+          map, markers: clusterMarkers.normal, averageCenter: true, minLevel: 6,
+          disableClickZoom: false, styles: clusterStyle("#fff"),
+        }),
+        new kakao.maps.MarkerClusterer({
+          map, markers: clusterMarkers.high, averageCenter: true, minLevel: 6,
+          disableClickZoom: false, styles: clusterStyle("#ff5c4d"),
+        }),
+      ];
       renderRoutePlan();
     }
 

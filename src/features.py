@@ -95,11 +95,14 @@ def load_roads(path: Path, grid_size_m: int, potholes: pd.DataFrame) -> pd.DataF
         aggregations: dict[str, str] = {
             "grid_x": "first",
             "grid_y": "first",
-            "grid_lat": "first",
-            "grid_lon": "first",
+            "lat": "mean",
+            "lon": "mean",
         }
         aggregations.update({column: "median" for column in optional})
         catalog = roads.groupby("grid_id", as_index=False).agg(aggregations)
+        # 격자 칸의 기하학적 중심 대신, 실제 도로 점들의 평균 좌표를 대표 좌표로 사용해
+        # 지도 마커가 도로선에 가깝게 찍히도록 합니다.
+        catalog = catalog.rename(columns={"lat": "grid_lat", "lon": "grid_lon"})
     else:
         base = potholes[["grid_x", "grid_y"]].drop_duplicates()
         rows: list[dict[str, int]] = []
