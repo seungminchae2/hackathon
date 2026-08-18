@@ -46,6 +46,10 @@
     .metric b { display:block; font-size:14px; }
     .metric span { color:var(--muted); font-size:10px; }
     .detail-reason { margin-top:10px; padding:10px; border-left:3px solid var(--orange); background:#fff8f1; color:#6d4b32; font-size:12px; line-height:1.45; }
+    .detail-authority { margin-top:10px; padding:10px 12px; border-radius:10px; background:#eaf3de; border-left:3px solid #639922; }
+    .detail-authority .label { font-size:11px; font-weight:700; color:#27500a; margin-bottom:4px; }
+    .detail-authority .dept, .detail-authority .phone { font-size:13px; color:#173404; }
+    .detail-authority .phone { margin-top:2px; }
     .marker { transform:translate(-50%,-50%); border:2px solid #fff; border-radius:50%; box-shadow:0 3px 10px rgba(0,0,0,.24); cursor:pointer; transition:transform .16s; }
     .marker:hover, .marker.selected { transform:translate(-50%,-50%) scale(1.32); z-index:5; }
     .danger-ring { width:18px; height:18px; border:3px solid #d93b36; border-radius:50%; box-shadow:0 0 0 3px rgba(217,59,54,.18); pointer-events:none; transition:opacity .15s, transform .15s; }
@@ -149,11 +153,17 @@
       } else {
         selectedMarker = null;
       }
+      const authorityHtml = row.road_authority_dept ? `
+        <div class="detail-authority">
+          <div class="label">관할 보수 담당</div>
+          <div class="dept">${esc(row.road_authority_dept)}</div>
+          <div class="phone">☎ ${esc(row.road_authority_phone)}</div>
+        </div>` : "";
       const detail = document.getElementById("detail");
       detail.className = "detail show";
       detail.innerHTML = `<div class="detail-top"><span class="detail-title">#${esc(row.priority_rank)} · ${esc(label(row))}</span><button class="close" aria-label="닫기">×</button></div>
         <div class="detail-grid"><div class="metric"><b>${pct(row.risk_score)}</b><span>모델 위험도</span></div><div class="metric"><b>${pct(row.recurrence_score)}</b><span>재발 위험</span></div><div class="metric"><b>${pct(row.priority_score)}</b><span>우선순위 점수</span></div><div class="metric"><b>${num(row.precip_7d,"mm")}</b><span>7일 강수</span></div><div class="metric"><b>${num(row.freeze_thaw_7d,"회")}</b><span>동결·융해</span></div><div class="metric"><b>${num(row.past_potholes_total,"건")}</b><span>누적 포트홀</span></div></div>
-        <div class="detail-reason"><b>모델 기여 원인</b><br>${esc(row.risk_reason)}</div>`;
+        <div class="detail-reason"><b>모델 기여 원인</b><br>${esc(row.risk_reason)}</div>${authorityHtml}`;
       detail.querySelector(".close").addEventListener("click", () => { selectedId = null; detail.className="detail"; renderList(); });
       renderList();
       if (pan && map && window.kakao) { map.panTo(new kakao.maps.LatLng(Number(row.grid_lat), Number(row.grid_lon))); map.setLevel(5); }
@@ -225,7 +235,10 @@
       (recommended.danger_points || []).forEach(point => {
         const ring = document.createElement("div");
         ring.className = "danger-ring";
+        ring.style.pointerEvents = "auto";
+        ring.style.cursor = "pointer";
         ring.title = `${label(point)} · 위험도 ${pct(point.risk_score)}`;
+        ring.addEventListener("click", () => selectRow(point.grid_id, true));
         const overlay = new kakao.maps.CustomOverlay({
           position:new kakao.maps.LatLng(Number(point.lat), Number(point.lon)),
           content:ring,
@@ -280,11 +293,11 @@
       }];
       clusterer = [
         new kakao.maps.MarkerClusterer({
-          map, markers: clusterMarkers.normal, averageCenter: false, gridSize: 100, minLevel: 6,
+          map, markers: clusterMarkers.normal, averageCenter: false, gridSize: 160, minLevel: 6,
           disableClickZoom: false, styles: clusterStyle("#fff"),
         }),
         new kakao.maps.MarkerClusterer({
-          map, markers: clusterMarkers.high, averageCenter: false, gridSize: 100, minLevel: 6,
+          map, markers: clusterMarkers.high, averageCenter: false, gridSize: 160, minLevel: 6,
           disableClickZoom: false, styles: clusterStyle("#ff5c4d"),
         }),
       ];

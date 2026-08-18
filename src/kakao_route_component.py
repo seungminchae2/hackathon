@@ -11,6 +11,8 @@ import streamlit.components.v1 as components
 MAP_COLUMNS = [
     "grid_id",
     "address",
+    "road_authority_dept",
+    "road_authority_phone",
     "grid_lat",
     "grid_lon",
     "risk_score",
