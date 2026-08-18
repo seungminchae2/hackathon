@@ -65,7 +65,7 @@ def main():
         )
 
     print(f"실제 라벨 컬럼: {label_col}")
-    print(f"Logistic 확률 컬럼: {probability_col}")
+    print(f"Logistic 모델 점수 컬럼: {probability_col}")
     print()
 
     df = df[[label_col, probability_col]].copy()

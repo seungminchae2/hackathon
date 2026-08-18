@@ -67,6 +67,7 @@ def read_csv_auto_encoding(
     for encoding in encodings:
 
         try:
+
             return pd.read_csv(
                 path,
                 encoding=encoding,
@@ -74,6 +75,7 @@ def read_csv_auto_encoding(
             )
 
         except UnicodeDecodeError as e:
+
             last_error = e
 
     raise last_error
@@ -357,22 +359,13 @@ def calculate_latest_past_repairs(
 
 
     # ========================================================
-    # 기존 road_risk_latest.csv 안에 이미 존재하는
-    # 보수 관련 컬럼 제거
+    # 기존 보수 관련 컬럼 제거
     #
-    # 이 컬럼들을 제거하지 않고 새 계산결과를 concat하면
-    # days_since_last_repair 등이 중복 생성되어
+    # road_risk_latest.csv에 이전 단계에서 생성된
+    # 보수 관련 컬럼이 존재할 수 있음.
     #
-    # latest["days_since_last_repair"]
-    #
-    # 가 Series가 아닌 DataFrame으로 반환될 수 있다.
-    #
-    # 그 결과 pd.to_numeric()에서
-    #
-    # TypeError:
-    # arg must be a list, tuple, 1-d array, or Series
-    #
-    # 오류가 발생한다.
+    # 새로 계산한 값과 같은 이름의 컬럼을 그대로 concat하면
+    # 중복 컬럼이 생성될 수 있으므로 먼저 제거함.
     # ========================================================
 
     old_repair_columns = [
@@ -413,8 +406,7 @@ def calculate_latest_past_repairs(
 
 
     # ========================================================
-    # 안전검사:
-    # 동일한 컬럼명이 남아 있는지 확인
+    # 중복 컬럼 최종 검사
     # ========================================================
 
     duplicate_columns = (
@@ -428,7 +420,7 @@ def calculate_latest_past_repairs(
     if duplicate_columns:
 
         raise ValueError(
-            "보수이력 재계산 후 중복 컬럼이 존재합니다: "
+            "중복 컬럼이 존재합니다: "
             f"{duplicate_columns}"
         )
 
@@ -621,10 +613,6 @@ def main():
     )
 
 
-    # ========================================================
-    # 기존 규칙 기반 위험도 보존
-    # ========================================================
-
     if (
         "risk_score"
         in latest.columns
@@ -660,10 +648,6 @@ def main():
             "risk_reason"
         ].astype(str)
 
-
-    # ========================================================
-    # repairs.csv 읽기
-    # ========================================================
 
     repairs = read_csv_auto_encoding(
         REPAIRS_FILE
@@ -739,35 +723,12 @@ def main():
     )
 
 
-    # ========================================================
-    # 최신 날짜 기준 보수이력 재계산
-    # ========================================================
-
     latest = (
         calculate_latest_past_repairs(
             latest,
             repairs
         )
     )
-
-
-    # ========================================================
-    # 전체 중복 컬럼 최종 검사
-    # ========================================================
-
-    duplicate_columns = (
-        latest.columns[
-            latest.columns.duplicated()
-        ]
-        .tolist()
-    )
-
-
-    if duplicate_columns:
-
-        raise ValueError(
-            f"중복 컬럼이 존재합니다: {duplicate_columns}"
-        )
 
 
     print(
@@ -811,10 +772,6 @@ def main():
         )
 
 
-    # ========================================================
-    # ML 입력 변수 숫자형 변환
-    # ========================================================
-
     for col in [
         "freeze_thaw_14d",
         "rain_7d",
@@ -856,10 +813,6 @@ def main():
     )
 
 
-    # ========================================================
-    # 학습 당시 결측 처리 방식 재현
-    # ========================================================
-
     latest.loc[
         latest[
             "has_past_repair"
@@ -886,13 +839,6 @@ def main():
 
 
     for col in FEATURES:
-
-        if col not in training.columns:
-
-            raise ValueError(
-                f"학습 데이터에 {col} 컬럼이 없습니다."
-            )
-
 
         training[col] = pd.to_numeric(
             training[col],
@@ -923,35 +869,6 @@ def main():
     )
 
 
-    # ========================================================
-    # 최종 모델 입력값 결측 여부 검사
-    # ========================================================
-
-    if X_latest.isna().any().any():
-
-        missing_counts = (
-            X_latest
-            .isna()
-            .sum()
-        )
-
-        missing_counts = (
-            missing_counts[
-                missing_counts
-                > 0
-            ]
-        )
-
-        raise ValueError(
-            "Logistic 모델 입력값에 결측치가 남아 있습니다:\n"
-            f"{missing_counts}"
-        )
-
-
-    # ========================================================
-    # Logistic Regression 모델
-    # ========================================================
-
     print(
         "\nLogistic Regression 모델 불러오는 중..."
     )
@@ -961,14 +878,6 @@ def main():
         LOGISTIC_MODEL_FILE
     )
 
-
-    # ========================================================
-    # Logistic model score
-    #
-    # balanced class weight를 적용해 학습했으므로
-    # 절대적인 실제 포트홀 발생확률로 해석하지 않고
-    # 상대 위험순위 계산에 사용한다.
-    # ========================================================
 
     latest[
         "logistic_score"
@@ -982,12 +891,6 @@ def main():
     )
 
 
-    # ========================================================
-    # Logistic 실제 변수 기여도
-    #
-    # 표준화 값 × Logistic 회귀계수
-    # ========================================================
-
     (
         latest,
         contribution_columns
@@ -997,10 +900,6 @@ def main():
         X_latest
     )
 
-
-    # ========================================================
-    # Logistic score를 680개 포인트 내 백분위로 환산
-    # ========================================================
 
     latest[
         "risk_percentile"
@@ -1046,10 +945,6 @@ def main():
         get_risk_rank_group
     )
 
-
-    # ========================================================
-    # 위험도 설명 생성
-    # ========================================================
 
     def make_reason(
         row
@@ -1185,10 +1080,6 @@ def main():
     )
 
 
-    # ========================================================
-    # 최종 위험도 순으로 정렬
-    # ========================================================
-
     latest = latest.sort_values(
         [
             "risk_score",
@@ -1198,14 +1089,8 @@ def main():
             False,
             False,
         ]
-    ).reset_index(
-        drop=True
     )
 
-
-    # ========================================================
-    # 결과 저장
-    # ========================================================
 
     OUTPUT_FILE.parent.mkdir(
         parents=True,
@@ -1219,10 +1104,6 @@ def main():
         encoding="utf-8-sig"
     )
 
-
-    # ========================================================
-    # 최종 검증
-    # ========================================================
 
     print(
         "\n최종 Logistic 도로 위험도 생성 완료"
