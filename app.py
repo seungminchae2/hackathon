@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -108,6 +111,21 @@ pred = normalize_predictions(pd.read_csv(prediction_path))
 if pred.empty:
     st.error("예측 파일에 데이터가 없습니다.")
     st.stop()
+
+current_prediction_date = str(pred.get("prediction_date", pd.Series([""])).iloc[0])
+if current_prediction_date != date.today().isoformat() and not st.session_state.get("refreshed_today"):
+    with st.spinner("오늘 날짜 기준으로 예측을 자동 갱신하는 중입니다..."):
+        result = subprocess.run(
+            [sys.executable, str(BASE_DIR / "scripts" / "refresh_daily.py")],
+            cwd=BASE_DIR,
+            capture_output=True,
+            text=True,
+        )
+    st.session_state["refreshed_today"] = True
+    if result.returncode == 0:
+        pred = normalize_predictions(pd.read_csv(prediction_path))
+    else:
+        st.warning("오늘 날짜로 자동 갱신하지 못했습니다. 이전 예측 데이터를 표시합니다.")
 
 key_env_name = config.get("kakao", {}).get("app_key_env", "KAKAO_MAP_APP_KEY")
 kakao_key = os.getenv(key_env_name, "").strip()

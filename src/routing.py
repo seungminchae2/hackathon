@@ -238,6 +238,18 @@ def _sample_path(path: list[list[float]], interval_km: float = 0.15) -> np.ndarr
     return np.asarray(samples, dtype=float)
 
 
+def _thin_by_distance(indices: list[int], grid: pd.DataFrame, min_gap_km: float = 0.3) -> list[int]:
+    """서로 너무 가까운 위험 지점은 겹쳐 보이므로, 순서대로 훑으며 최소 간격을 두고 골라냅니다."""
+    kept: list[int] = []
+    kept_points: list[list[float]] = []
+    for index in indices:
+        point = [float(grid.iloc[index]["grid_lon"]), float(grid.iloc[index]["grid_lat"])]
+        if all(_haversine_km(point, other) >= min_gap_km for other in kept_points):
+            kept.append(index)
+            kept_points.append(point)
+    return kept
+
+
 def analyze_route_risk(
     route: dict[str, Any],
     predictions: pd.DataFrame,
@@ -283,7 +295,7 @@ def analyze_route_risk(
                     "risk_score": float(risk_scores[index]),
                     "risk_level": str(grid.iloc[index]["risk_level"]),
                 }
-                for index in high_indices[:30]
+                for index in _thin_by_distance(high_indices, grid)[:30]
             ],
         }
     )

@@ -23,7 +23,8 @@ stations = pd.DataFrame(
     columns=["station_id", "station_name", "lat", "lon"],
 )
 
-history_dates = pd.date_range("2024-01-01", "2025-12-31", freq="D")
+today = pd.Timestamp.now().normalize()
+history_dates = pd.date_range(today - pd.Timedelta(days=730), today - pd.Timedelta(days=3), freq="D")
 weather_rows = []
 for station in stations.itertuples(index=False):
     phase = rng.uniform(-0.25, 0.25)
@@ -55,7 +56,7 @@ for station in stations.itertuples(index=False):
 weather = pd.DataFrame(weather_rows)
 weather.to_csv(DATA_DIR / "weather_history.csv", index=False)
 
-forecast_dates = pd.date_range("2026-01-01", "2026-01-03", freq="D")
+forecast_dates = pd.date_range(today - pd.Timedelta(days=2), today, freq="D")
 forecast_rows = []
 for station in stations.itertuples(index=False):
     for i, date in enumerate(forecast_dates):
@@ -80,25 +81,30 @@ for station in stations.itertuples(index=False):
         )
 pd.DataFrame(forecast_rows).to_csv(DATA_DIR / "weather_forecast.csv", index=False)
 
-# 도로 점: 관측소 주변 도로 축을 단순 생성
-road_rows = []
-road_id = 1
-for station in stations.itertuples(index=False):
-    for angle in [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]:
-        for step in np.linspace(-0.08, 0.08, 34):
-            lat = station.lat + step * np.sin(angle) + rng.normal(0, 0.0007)
-            lon = station.lon + step * np.cos(angle) + rng.normal(0, 0.0007)
-            road_rows.append(
-                {
-                    "road_point_id": f"R{road_id:05d}",
-                    "lat": round(lat, 6),
-                    "lon": round(lon, 6),
-                    "road_name": f"{station.station_name} 데모도로",
-                }
-            )
-            road_id += 1
-roads = pd.DataFrame(road_rows)
-roads.to_csv(DATA_DIR / "roads.csv", index=False)
+# 도로 점: 실제 도로망(data/roads.csv)이 이미 있으면 그대로 재사용하고,
+# 없을 때만 관측소 주변 도로 축을 단순 생성해 대체합니다.
+roads_path = DATA_DIR / "roads.csv"
+if roads_path.exists():
+    roads = pd.read_csv(roads_path)
+else:
+    road_rows = []
+    road_id = 1
+    for station in stations.itertuples(index=False):
+        for angle in [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]:
+            for step in np.linspace(-0.08, 0.08, 34):
+                lat = station.lat + step * np.sin(angle) + rng.normal(0, 0.0007)
+                lon = station.lon + step * np.cos(angle) + rng.normal(0, 0.0007)
+                road_rows.append(
+                    {
+                        "road_point_id": f"R{road_id:05d}",
+                        "lat": round(lat, 6),
+                        "lon": round(lon, 6),
+                        "road_name": f"{station.station_name} 데모도로",
+                    }
+                )
+                road_id += 1
+    roads = pd.DataFrame(road_rows)
+    roads.to_csv(roads_path, index=False)
 
 # 포트홀: 겨울철, 강수 직후, 반복 위치에 더 자주 생기도록 합성
 road_sample = roads.sample(65, random_state=42).reset_index(drop=True)
@@ -107,13 +113,12 @@ for idx, road in road_sample.iterrows():
     n_events = rng.integers(1, 5 if idx < 12 else 3)
     for _ in range(n_events):
         winter_bias = rng.random() < 0.67
-        if winter_bias:
-            month = int(rng.choice([1, 2, 3, 11, 12]))
-        else:
-            month = int(rng.integers(1, 13))
-        year = int(rng.choice([2024, 2025]))
-        day = int(rng.integers(1, 28))
-        date = pd.Timestamp(year=year, month=month, day=day)
+        candidates = (
+            history_dates[history_dates.month.isin([1, 2, 3, 11, 12])]
+            if winter_bias
+            else history_dates
+        )
+        date = pd.Timestamp(rng.choice(candidates))
         pothole_rows.append(
             {
                 "event_id": f"P{len(pothole_rows)+1:04d}",
