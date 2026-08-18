@@ -1,6 +1,6 @@
 {
   "schema_version": "2.0",
-  "trained_at_utc": "2026-08-16T11:23:10.874928+00:00",
+  "trained_at_utc": "2026-08-18T10:39:10.997275+00:00",
   "target": "기준일 다음 30일 내 포트홀 발생 여부",
   "features": [
     "grid_lat",
@@ -16,29 +16,29 @@
   "split": {
     "validation_start": "2025-03-31",
     "test_start": "2025-07-14",
-    "train_rows": 276185,
-    "validation_rows": 63735,
-    "test_rows": 85587
+    "train_rows": 3361085,
+    "validation_rows": 775635,
+    "test_rows": 1041567
   },
   "class_imbalance": {
-    "train_positive": 1823,
-    "train_negative": 274362,
-    "scale_pos_weight": 150.50027427317607
+    "train_positive": 463,
+    "train_negative": 3360622,
+    "scale_pos_weight": 7258.362850971922
   },
   "metrics": {
     "validation": {
-      "roc_auc": 0.5459286213288086,
-      "pr_auc": 0.0050358501875592,
-      "f1": 0.04103967168262654,
-      "threshold": 0.4956061542034149,
-      "positive_rate": 0.002714364164117047
+      "roc_auc": 0.9901301134813039,
+      "pr_auc": 0.002108089656689065,
+      "f1": 0.00718132854578097,
+      "threshold": 0.001222682185471058,
+      "positive_rate": 3.867798642402677e-05
     },
     "test": {
-      "roc_auc": 0.5883720654212263,
-      "pr_auc": 0.007601763837037432,
-      "f1": 0.004885993485342019,
-      "threshold": 0.4956061542034149,
-      "positive_rate": 0.006017268977765315
+      "roc_auc": 0.8463226272264883,
+      "pr_auc": 0.00010899542204612203,
+      "f1": 0.0,
+      "threshold": 0.001222682185471058,
+      "positive_rate": 2.9762847709268823e-05
     }
   },
   "notes": [

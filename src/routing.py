@@ -14,6 +14,7 @@ from .common import haversine_distance_matrix
 
 LOCAL_ADDRESS_URL = "https://dapi.kakao.com/v2/local/search/address.json"
 LOCAL_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
+COORD2ADDRESS_URL = "https://dapi.kakao.com/v2/local/geo/coord2address.json"
 DIRECTIONS_URL = "https://apis-navi.kakaomobility.com/v1/directions"
 HIGH_RISK_LEVELS = {"매우 높음", "높음"}
 
@@ -116,6 +117,22 @@ def resolve_place(query: str, rest_api_key: str) -> dict[str, Any]:
         "lon": float(document["x"]),
         "lat": float(document["y"]),
     }
+
+
+def reverse_geocode(lat: float, lon: float, rest_api_key: str) -> str:
+    """위경도 좌표를 도로명 주소(없으면 지번 주소) 문자열로 변환합니다."""
+    payload = _get_json(
+        COORD2ADDRESS_URL,
+        rest_api_key,
+        {"x": lon, "y": lat, "input_coord": "WGS84"},
+    )
+    documents = payload.get("documents") or []
+    if not documents:
+        return ""
+    document = documents[0]
+    road_address = document.get("road_address") or {}
+    address = document.get("address") or {}
+    return road_address.get("address_name") or address.get("address_name") or ""
 
 
 def _extract_route(route: dict[str, Any], route_index: int) -> dict[str, Any]:
@@ -260,6 +277,7 @@ def analyze_route_risk(
             "danger_points": [
                 {
                     "grid_id": str(grid.iloc[index]["grid_id"]),
+                    "address": str(grid.iloc[index]["address"]) if "address" in grid.columns else "",
                     "lat": float(grid.iloc[index]["grid_lat"]),
                     "lon": float(grid.iloc[index]["grid_lon"]),
                     "risk_score": float(risk_scores[index]),

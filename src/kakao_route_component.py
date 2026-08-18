@@ -10,6 +10,7 @@ import streamlit.components.v1 as components
 
 MAP_COLUMNS = [
     "grid_id",
+    "address",
     "grid_lat",
     "grid_lon",
     "risk_score",

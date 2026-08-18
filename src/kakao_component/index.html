@@ -84,13 +84,17 @@
     let map = null;
     let selectedId = null;
     let initialized = false;
-    const overlays = new Map();
+    const markersById = new Map();
+    const markerImageCache = new Map();
+    let clusterer = null;
+    let selectedMarker = null;
     const routeObjects = [];
     const colors = {"매우 높음":"#d93b36","높음":"#ed7a2c","보통":"#e7b642","낮음":"#3d8b68"};
 
     const pct = v => Number.isFinite(Number(v)) ? `${(Number(v)*100).toFixed(1)}%` : "-";
     const num = (v, suffix="") => Number.isFinite(Number(v)) ? `${Number(v).toLocaleString("ko-KR",{maximumFractionDigits:1})}${suffix}` : "-";
     const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    const label = r => (r.address && String(r.address).trim()) || r.grid_id;
 
     function send(type, payload={}) {
       window.parent.postMessage({isStreamlitMessage:true,type,...payload}, "*");
@@ -99,7 +103,7 @@
     function filteredRows() {
       const q = document.getElementById("search").value.trim().toLowerCase();
       const level = document.getElementById("riskFilter").value;
-      return rows.filter(r => (!q || String(r.grid_id).toLowerCase().includes(q)) && (level === "all" || r.risk_level === level));
+      return rows.filter(r => (!q || String(label(r)).toLowerCase().includes(q) || String(r.grid_id).toLowerCase().includes(q)) && (level === "all" || r.risk_level === level));
     }
 
     function renderList() {
@@ -108,20 +112,43 @@
       document.getElementById("list").innerHTML = filtered.length ? filtered.map(r => `
         <button class="card ${selectedId === r.grid_id ? "active" : ""}" data-id="${esc(r.grid_id)}">
           <span class="rank">${esc(r.priority_rank)}</span>
-          <span><span class="name">${esc(r.grid_id)}</span><span class="reason">${esc(r.risk_reason)}</span></span>
+          <span><span class="name">${esc(label(r))}</span><span class="reason">${esc(r.risk_reason)}</span></span>
           <span class="scores"><span class="score">${pct(r.priority_score)}</span><span class="level" style="color:${colors[r.risk_level] || "#66756f"}">${esc(r.risk_level)}</span></span>
         </button>`).join("") : '<div class="empty-list">조건에 맞는 격자가 없습니더.</div>';
       document.querySelectorAll(".card").forEach(el => el.addEventListener("click", () => selectRow(el.dataset.id, true)));
+    }
+
+    function markerImage(color, size, selected) {
+      const key = `${color}_${size}_${selected}`;
+      if (markerImageCache.has(key)) return markerImageCache.get(key);
+      const d = selected ? Math.round(size * 1.3) + 4 : size + 4;
+      const r = (d - 4) / 2;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${d/2}" cy="${d/2}" r="${r}" fill="${color}" stroke="#fff" stroke-width="${selected ? 3 : 2}"/></svg>`;
+      const src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      const image = new kakao.maps.MarkerImage(src, new kakao.maps.Size(d, d), {offset: new kakao.maps.Point(d / 2, d / 2)});
+      markerImageCache.set(key, image);
+      return image;
     }
 
     function selectRow(id, pan) {
       const row = rows.find(r => String(r.grid_id) === String(id));
       if (!row) return;
       selectedId = row.grid_id;
-      document.querySelectorAll(".marker").forEach(el => el.classList.toggle("selected", el.dataset.id === String(id)));
+      if (selectedMarker) {
+        const prev = selectedMarker;
+        prev.marker.setImage(markerImage(prev.color, prev.size, false));
+      }
+      const entry = markersById.get(String(id));
+      if (entry) {
+        entry.marker.setImage(markerImage(entry.color, entry.size, true));
+        entry.marker.setZIndex(10);
+        selectedMarker = entry;
+      } else {
+        selectedMarker = null;
+      }
       const detail = document.getElementById("detail");
       detail.className = "detail show";
-      detail.innerHTML = `<div class="detail-top"><span class="detail-title">#${esc(row.priority_rank)} · ${esc(row.grid_id)}</span><button class="close" aria-label="닫기">×</button></div>
+      detail.innerHTML = `<div class="detail-top"><span class="detail-title">#${esc(row.priority_rank)} · ${esc(label(row))}</span><button class="close" aria-label="닫기">×</button></div>
         <div class="detail-grid"><div class="metric"><b>${pct(row.risk_score)}</b><span>모델 위험도</span></div><div class="metric"><b>${pct(row.recurrence_score)}</b><span>재발 위험</span></div><div class="metric"><b>${pct(row.priority_score)}</b><span>우선순위 점수</span></div><div class="metric"><b>${num(row.precip_7d,"mm")}</b><span>7일 강수</span></div><div class="metric"><b>${num(row.freeze_thaw_7d,"회")}</b><span>동결·융해</span></div><div class="metric"><b>${num(row.past_potholes_total,"건")}</b><span>누적 포트홀</span></div></div>
         <div class="detail-reason"><b>모델 기여 원인</b><br>${esc(row.risk_reason)}</div>`;
       detail.querySelector(".close").addEventListener("click", () => { selectedId = null; detail.className="detail"; renderList(); });
@@ -188,7 +215,7 @@
       (recommended.danger_points || []).forEach(point => {
         const ring = document.createElement("div");
         ring.className = "danger-ring";
-        ring.title = `${point.grid_id} · 위험도 ${pct(point.risk_score)}`;
+        ring.title = `${label(point)} · 위험도 ${pct(point.risk_score)}`;
         const overlay = new kakao.maps.CustomOverlay({
           position:new kakao.maps.LatLng(Number(point.lat), Number(point.lon)),
           content:ring,
@@ -217,16 +244,31 @@
       const avgLon = valid.reduce((s,r) => s + Number(r.grid_lon), 0) / valid.length;
       map = new kakao.maps.Map(document.getElementById("map"), {center:new kakao.maps.LatLng(avgLat,avgLon),level:11});
       map.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
+      const clusterMarkers = [];
       valid.forEach(r => {
         const size = Math.round(14 + Number(r.risk_score || 0) * 14);
-        const marker = document.createElement("div");
-        marker.className = "marker";
-        marker.dataset.id = r.grid_id;
-        marker.title = `${r.grid_id} · 위험도 ${pct(r.risk_score)}`;
-        marker.style.cssText = `width:${size}px;height:${size}px;background:${colors[r.risk_level] || "#3d8b68"};`;
-        marker.addEventListener("click", () => selectRow(r.grid_id, false));
-        const overlay = new kakao.maps.CustomOverlay({position:new kakao.maps.LatLng(Number(r.grid_lat),Number(r.grid_lon)),content:marker,yAnchor:.5,zIndex:Number(r.priority_rank) <= 20 ? 3 : 1});
-        overlay.setMap(map); overlays.set(String(r.grid_id), overlay);
+        const color = colors[r.risk_level] || "#3d8b68";
+        const marker = new kakao.maps.Marker({
+          position: new kakao.maps.LatLng(Number(r.grid_lat), Number(r.grid_lon)),
+          image: markerImage(color, size, false),
+          title: `${label(r)} · 위험도 ${pct(r.risk_score)}`,
+          zIndex: Number(r.priority_rank) <= 20 ? 3 : 1,
+        });
+        kakao.maps.event.addListener(marker, "click", () => selectRow(r.grid_id, false));
+        markersById.set(String(r.grid_id), {marker, color, size});
+        clusterMarkers.push(marker);
+      });
+      clusterer = new kakao.maps.MarkerClusterer({
+        map,
+        markers: clusterMarkers,
+        averageCenter: true,
+        minLevel: 6,
+        disableClickZoom: false,
+        styles: [{
+          width: "40px", height: "40px", lineHeight: "40px",
+          background: "rgba(13,107,79,.85)", color: "#fff",
+          borderRadius: "50%", textAlign: "center", fontWeight: "800", fontSize: "13px",
+        }],
       });
       renderRoutePlan();
     }
@@ -235,7 +277,7 @@
       renderList();
       if (!kakaoKey) { showMapError("카카오 지도 키가 필요합니더", ".env에 JavaScript 키를 입력하고 새로고침하십시오."); return; }
       const sdk = document.createElement("script");
-      sdk.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(kakaoKey)}&autoload=false`;
+      sdk.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(kakaoKey)}&autoload=false&libraries=clusterer`;
       sdk.onload = () => kakao.maps.load(initMap);
       sdk.onerror = () => showMapError("카카오 지도를 불러오지 못했습니더", "REST API 키가 아닌 JavaScript 키인지, localhost:8501이 Web 플랫폼에 등록됐는지 확인하십시오.");
       document.head.appendChild(sdk);

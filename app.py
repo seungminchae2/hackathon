@@ -187,6 +187,7 @@ with tab_components:
     display_columns = [
         "priority_rank",
         "grid_id",
+        "address",
         "priority_score",
         "risk_score",
         "recurrence_score",
@@ -198,6 +199,7 @@ with tab_components:
         hide_index=True,
         width="stretch",
         column_config={
+            "address": st.column_config.TextColumn("주소"),
             "priority_score": st.column_config.ProgressColumn("우선순위", min_value=0, max_value=1, format="%.3f"),
             "risk_score": st.column_config.ProgressColumn("모델 위험", min_value=0, max_value=1, format="%.3f"),
             "recurrence_score": st.column_config.ProgressColumn("재발 위험", min_value=0, max_value=1, format="%.3f"),
