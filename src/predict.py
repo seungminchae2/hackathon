@@ -472,12 +472,6 @@ def calculate_relative_model_score(
 def calculate_absolute_feature_component(
     latest: pd.DataFrame,
 ) -> pd.Series:
-    result = pd.Series(
-        0.0,
-        index=latest.index,
-        dtype=float,
-    )
-
     pothole_30 = pd.to_numeric(
         latest.get(
             "past_potholes_30d",
@@ -731,14 +725,6 @@ def determine_action_level(
         )
     )
 
-    # 예방보수
-    #
-    # 단순히 당일 상대순위가 높다는 이유로
-    # 예방보수하지 않습니다.
-    #
-    # 절대위험 80점 이상
-    # + 강한 실증 Trigger
-    # + 당일 상위 5%를 모두 만족해야 합니다.
     if (
         absolute_score >= 80
         and strong_trigger
@@ -746,22 +732,12 @@ def determine_action_level(
     ):
         return "예방보수"
 
-    # 긴급점검
-    #
-    # 절대위험이 60 이상이거나,
-    # 과거 데이터에서 매우 높은 Lift가 확인된
-    # 최근 포트홀 + 동결융해 조건일 경우
     if (
         absolute_score >= 60
         or strong_trigger
     ):
         return "긴급점검"
 
-    # 우선점검
-    #
-    # 절대위험 40 이상,
-    # 당일 상대위험 상위 5%,
-    # 일반 위험 Trigger 중 하나라도 해당
     if (
         absolute_score >= 40
         or relative_top <= 5
@@ -874,6 +850,11 @@ def main(
             errors="coerce",
         ).dropna()
 
+        if available_dates.empty:
+            raise ValueError(
+                "weather_forecast.csv에 유효한 예보 날짜가 없습니다."
+            )
+
         target_date = (
             pd.Timestamp(
                 prediction_date
@@ -881,6 +862,14 @@ def main(
             if prediction_date
             else available_dates.max().normalize()
         )
+
+        if target_date not in set(
+            available_dates.dt.normalize()
+        ):
+            raise ValueError(
+                f"예측 요청 날짜 {target_date.date()}가 "
+                "weather_forecast.csv에 없습니다."
+            )
 
         prepared = prepare_dataset(
             pothole_path=resolve_path(
@@ -943,10 +932,6 @@ def main(
             "model"
         ]
 
-        # -----------------------------------------
-        # 1. XGBoost 원본 모델 점수
-        # -----------------------------------------
-
         latest["risk_score"] = (
             model.predict_proba(
                 matrix
@@ -966,20 +951,12 @@ def main(
             )
         ).astype(int)
 
-        # -----------------------------------------
-        # 2. 도로 구조 위험
-        # -----------------------------------------
-
         latest = (
             calculate_road_structure_score(
                 latest,
                 bundle,
             )
         )
-
-        # -----------------------------------------
-        # 3. feature 기반 상대위험
-        # -----------------------------------------
 
         (
             feature_display_score,
@@ -996,10 +973,6 @@ def main(
             feature_display_score
         )
 
-        # -----------------------------------------
-        # 4. XGBoost 당일 상대위험
-        # -----------------------------------------
-
         latest[
             "model_relative_score"
         ] = (
@@ -1009,14 +982,6 @@ def main(
                 ]
             )
         )
-
-        # -----------------------------------------
-        # 5. 상대 AI 종합위험지수
-        #
-        # feature 65%
-        # XGBoost 20%
-        # 도로구조 15%
-        # -----------------------------------------
 
         latest[
             "relative_ai_index"
@@ -1038,7 +1003,6 @@ def main(
             1,
         )
 
-        # 기존 실험에서 확정한 sqrt 변환
         latest[
             "road_risk_score"
         ] = (
@@ -1052,13 +1016,6 @@ def main(
             0,
             100,
         ).round(1)
-
-        # -----------------------------------------
-        # 6. 당일 상대순위
-        #
-        # 0에 가까울수록 위험도가 높은 도로
-        # 예: 0.5 = 상위 0.5%
-        # -----------------------------------------
 
         descending_rank = (
             latest[
@@ -1101,13 +1058,6 @@ def main(
             )
         )
 
-        # -----------------------------------------
-        # 7. 절대 위험점수
-        #
-        # 당일 전체 도로 분포와 관계없이
-        # 실제 feature의 절대 크기로 계산
-        # -----------------------------------------
-
         latest[
             "absolute_feature_score"
         ] = (
@@ -1116,12 +1066,6 @@ def main(
             )
         )
 
-        # 절대위험에서는 상대순위보다
-        # 실제 환경 조건을 중심으로 계산
-        #
-        # feature 절대위험 75%
-        # 도로구조 위험 15%
-        # 모델 원본 위험 신호 10%
         model_absolute_signal = (
             latest[
                 "risk_score"
@@ -1170,10 +1114,6 @@ def main(
             )
         )
 
-        # -----------------------------------------
-        # 8. 실증 기반 Trigger
-        # -----------------------------------------
-
         latest[
             "risk_trigger"
         ] = (
@@ -1182,10 +1122,6 @@ def main(
                 axis=1,
             )
         )
-
-        # -----------------------------------------
-        # 9. 최종 조치 단계
-        # -----------------------------------------
 
         latest[
             "action_level"
@@ -1208,10 +1144,6 @@ def main(
             .astype(int)
         )
 
-        # -----------------------------------------
-        # 10. 위험 원인 설명
-        # -----------------------------------------
-
         latest[
             "risk_reason"
         ] = explain_with_contributions(
@@ -1219,10 +1151,6 @@ def main(
             matrix,
             latest,
         )
-
-        # -----------------------------------------
-        # 11. 기존 보수 우선도
-        # -----------------------------------------
 
         priority = (
             calculate_priority_components(
@@ -1251,10 +1179,6 @@ def main(
             .date()
             .isoformat()
         )
-
-        # -----------------------------------------
-        # 12. 조치 우선순위
-        # -----------------------------------------
 
         action_priority = {
             "예방보수": 4,
@@ -1311,7 +1235,6 @@ def main(
             ]
         )
 
-        # 기존 priority_rank도 별도로 유지
         priority_order = (
             latest[
                 "priority_score"
@@ -1328,10 +1251,6 @@ def main(
             priority_order
             .astype(int)
         )
-
-        # -----------------------------------------
-        # 13. 출력 컬럼
-        # -----------------------------------------
 
         output_columns = [
             "prediction_date",
@@ -1421,9 +1340,12 @@ def main(
             if column in latest.columns
         ]
 
-        # -----------------------------------------
-        # 14. CSV 저장
-        # -----------------------------------------
+        # ==================================================
+        # CSV 저장
+        #
+        # 1. 기존 predictions_v2.csv 유지
+        # 2. 날짜별 predictions_YYYY-MM-DD.csv 추가 저장
+        # ==================================================
 
         output_path = resolve_path(
             config,
@@ -1435,17 +1357,34 @@ def main(
             exist_ok=True,
         )
 
-        latest[
+        output_df = latest[
             output_columns
-        ].to_csv(
+        ].copy()
+
+        # 기존 Streamlit 호환용
+        output_df.to_csv(
             output_path,
             index=False,
             float_format="%.8f",
         )
 
-        # -----------------------------------------
-        # 15. 결과 출력
-        # -----------------------------------------
+        # 날짜별 예측 파일
+        date_string = (
+            target_date
+            .date()
+            .isoformat()
+        )
+
+        dated_output_path = (
+            output_path.parent
+            / f"predictions_{date_string}.csv"
+        )
+
+        output_df.to_csv(
+            dated_output_path,
+            index=False,
+            float_format="%.8f",
+        )
 
         print()
         print(
@@ -1493,8 +1432,13 @@ def main(
 
         print()
         print(
-            f"예측 저장 완료: "
+            f"기본 예측 저장 완료: "
             f"{output_path}"
+        )
+
+        print(
+            f"날짜별 예측 저장 완료: "
+            f"{dated_output_path}"
         )
 
         print()
