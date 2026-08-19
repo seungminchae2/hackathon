@@ -14,6 +14,7 @@ from .common import haversine_distance_matrix
 
 LOCAL_ADDRESS_URL = "https://dapi.kakao.com/v2/local/search/address.json"
 LOCAL_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
+COORD2ADDRESS_URL = "https://dapi.kakao.com/v2/local/geo/coord2address.json"
 DIRECTIONS_URL = "https://apis-navi.kakaomobility.com/v1/directions"
 HIGH_RISK_LEVELS = {"매우 높음", "높음"}
 
@@ -116,6 +117,22 @@ def resolve_place(query: str, rest_api_key: str) -> dict[str, Any]:
         "lon": float(document["x"]),
         "lat": float(document["y"]),
     }
+
+
+def reverse_geocode(lat: float, lon: float, rest_api_key: str) -> str:
+    """위경도 좌표를 도로명 주소(없으면 지번 주소) 문자열로 변환합니다."""
+    payload = _get_json(
+        COORD2ADDRESS_URL,
+        rest_api_key,
+        {"x": lon, "y": lat, "input_coord": "WGS84"},
+    )
+    documents = payload.get("documents") or []
+    if not documents:
+        return ""
+    document = documents[0]
+    road_address = document.get("road_address") or {}
+    address = document.get("address") or {}
+    return road_address.get("address_name") or address.get("address_name") or ""
 
 
 def _extract_route(route: dict[str, Any], route_index: int) -> dict[str, Any]:
@@ -221,6 +238,18 @@ def _sample_path(path: list[list[float]], interval_km: float = 0.15) -> np.ndarr
     return np.asarray(samples, dtype=float)
 
 
+def _thin_by_distance(indices: list[int], grid: pd.DataFrame, min_gap_km: float = 0.3) -> list[int]:
+    """서로 너무 가까운 위험 지점은 겹쳐 보이므로, 순서대로 훑으며 최소 간격을 두고 골라냅니다."""
+    kept: list[int] = []
+    kept_points: list[list[float]] = []
+    for index in indices:
+        point = [float(grid.iloc[index]["grid_lon"]), float(grid.iloc[index]["grid_lat"])]
+        if all(_haversine_km(point, other) >= min_gap_km for other in kept_points):
+            kept.append(index)
+            kept_points.append(point)
+    return kept
+
+
 def analyze_route_risk(
     route: dict[str, Any],
     predictions: pd.DataFrame,
@@ -260,12 +289,13 @@ def analyze_route_risk(
             "danger_points": [
                 {
                     "grid_id": str(grid.iloc[index]["grid_id"]),
+                    "address": str(grid.iloc[index]["address"]) if "address" in grid.columns else "",
                     "lat": float(grid.iloc[index]["grid_lat"]),
                     "lon": float(grid.iloc[index]["grid_lon"]),
                     "risk_score": float(risk_scores[index]),
                     "risk_level": str(grid.iloc[index]["risk_level"]),
                 }
-                for index in high_indices[:30]
+                for index in _thin_by_distance(high_indices, grid)[:30]
             ],
         }
     )

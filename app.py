@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -84,6 +87,9 @@ def normalize_predictions(frame: pd.DataFrame) -> pd.DataFrame:
         out["recurrence_score"] = recurrence.div(scale).clip(upper=1)
     if "importance_score" not in out:
         out["importance_score"] = np.nan
+    if "address" in out.columns:
+        missing_address = out["address"].isna() | out["address"].astype(str).str.strip().eq("")
+        out.loc[missing_address, "address"] = out.loc[missing_address, "grid_id"]
     if "priority_score" not in out:
         out["priority_score"] = (out["risk_score"] * 0.75 + out["recurrence_score"] * 0.15) / 0.90
     out = out.sort_values(
@@ -96,6 +102,22 @@ def normalize_predictions(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def attach_road_authority(df: pd.DataFrame, path: Path) -> pd.DataFrame:
+    """주소의 시군명을 기준으로 관할 보수 담당 부서·연락처를 붙입니다."""
+    out = df.copy()
+    out["road_authority_dept"] = None
+    out["road_authority_phone"] = None
+    if not path.exists() or "address" not in out.columns:
+        return out
+    authorities = pd.read_csv(path)
+    address = out["address"].astype(str)
+    for row in authorities.itertuples(index=False):
+        mask = address.str.contains(row.sigungu_name, na=False, regex=False)
+        out.loc[mask, "road_authority_dept"] = f"{row.sigungu_name} {row.dept_name}"
+        out.loc[mask, "road_authority_phone"] = row.phone_number
+    return out
+
+
 prediction_path = resolve_path(config, "predictions")
 if not prediction_path.exists():
     st.error("예측 파일이 없습니다. `python -m src.predict --config config.yaml`을 먼저 실행하십시오.")
@@ -105,6 +127,31 @@ pred = normalize_predictions(pd.read_csv(prediction_path))
 if pred.empty:
     st.error("예측 파일에 데이터가 없습니다.")
     st.stop()
+
+current_prediction_date = str(pred.get("prediction_date", pd.Series([""])).iloc[0])
+if current_prediction_date != date.today().isoformat():
+    banner_col, button_col = st.columns([5, 1], vertical_alignment="center")
+    banner_col.info(f"예측 기준일이 {current_prediction_date}로 오늘({date.today().isoformat()})보다 오래됐습니다.")
+    if button_col.button("오늘 날짜로 갱신", width="stretch"):
+        with st.spinner("오늘 날짜 기준으로 예측을 갱신하는 중입니다... (몇 분 걸릴 수 있습니다. 이 탭을 닫지 마십시오)"):
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(BASE_DIR / "scripts" / "refresh_daily.py")],
+                    cwd=BASE_DIR,
+                    capture_output=True,
+                    text=True,
+                    timeout=1800,
+                )
+            except subprocess.TimeoutExpired:
+                st.error("갱신이 30분 넘게 걸려 중단했습니다. 터미널에서 `python scripts/refresh_daily.py`를 직접 실행해 보십시오.")
+                st.stop()
+        if result.returncode == 0:
+            st.success("갱신 완료. 최신 데이터를 불러옵니다.")
+            st.rerun()
+        else:
+            st.error("갱신에 실패했습니다. 터미널에서 `python scripts/refresh_daily.py`를 직접 실행해 오류를 확인하십시오.")
+
+pred = attach_road_authority(pred, BASE_DIR / "data" / "road_authorities.csv")
 
 key_env_name = config.get("kakao", {}).get("app_key_env", "KAKAO_MAP_APP_KEY")
 kakao_key = os.getenv(key_env_name, "").strip()
@@ -187,6 +234,7 @@ with tab_components:
     display_columns = [
         "priority_rank",
         "grid_id",
+        "address",
         "priority_score",
         "risk_score",
         "recurrence_score",
@@ -198,6 +246,7 @@ with tab_components:
         hide_index=True,
         width="stretch",
         column_config={
+            "address": st.column_config.TextColumn("주소"),
             "priority_score": st.column_config.ProgressColumn("우선순위", min_value=0, max_value=1, format="%.3f"),
             "risk_score": st.column_config.ProgressColumn("모델 위험", min_value=0, max_value=1, format="%.3f"),
             "recurrence_score": st.column_config.ProgressColumn("재발 위험", min_value=0, max_value=1, format="%.3f"),
@@ -210,15 +259,34 @@ with tab_model:
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
         test_metrics = metrics.get("metrics", {}).get("test", {})
         validation_metrics = metrics.get("metrics", {}).get("validation", {})
+        split = metrics.get("split", {})
+        imbalance = metrics.get("class_imbalance", {})
+
+        st.caption("테스트 구간 (실제 성능 확인용)")
         m1, m2, m3 = st.columns(3)
         m1.metric("Test ROC-AUC", f"{test_metrics.get('roc_auc', 0):.3f}")
-        m2.metric("Test PR-AUC", f"{test_metrics.get('pr_auc', 0):.3f}")
+        m2.metric("Test PR-AUC", f"{test_metrics.get('pr_auc', 0):.4f}")
         m3.metric("Test F1", f"{test_metrics.get('f1', 0):.3f}")
-        st.caption(
-            f"검증 구간에서 선택한 분류 임계값 {validation_metrics.get('threshold', 0.5):.4f}를 "
-            "테스트 구간에 그대로 적용했습니다. risk_score는 보정 전 상대 위험 점수입니다."
+
+        st.caption("검증 구간 (분류 임계값을 정한 구간)")
+        v1, v2, v3 = st.columns(3)
+        v1.metric("Validation ROC-AUC", f"{validation_metrics.get('roc_auc', 0):.3f}")
+        v2.metric("Validation PR-AUC", f"{validation_metrics.get('pr_auc', 0):.4f}")
+        v3.metric("Validation F1", f"{validation_metrics.get('f1', 0):.3f}")
+
+        train_positive = imbalance.get("train_positive", 0)
+        train_negative = imbalance.get("train_negative", 0)
+        st.warning(
+            f"학습 구간의 양성(포트홀 발생) 샘플이 {train_positive:,}개뿐이고 음성은 {train_negative:,}개라, "
+            "PR-AUC·F1이 0에 가깝게 나옵니다. ROC-AUC는 높아 보여도 이런 극단적 불균형에서는 "
+            "실제 변별력을 의미하지 않습니다 — 원본 포트홀 이력 데이터 자체가 적기 때문입니다."
         )
-        st.json(metrics, expanded=False)
+        st.caption(
+            f"학습 {split.get('train_rows', 0):,}행 · 검증 {split.get('validation_rows', 0):,}행 · "
+            f"테스트 {split.get('test_rows', 0):,}행 · "
+            f"검증 구간에서 고른 분류 임계값 {validation_metrics.get('threshold', 0.5):.4f}를 테스트 구간에 그대로 적용했습니다. "
+            "risk_score는 보정 전 상대 위험 점수입니다."
+        )
     else:
         st.info("새 모델을 학습하면 `outputs/metrics_v2.json`에 검증 지표가 저장됩니다.")
 
