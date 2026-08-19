@@ -16,7 +16,6 @@ from src.features import risk_level_from_percentile
 from src.kakao_route_component import show_kakao_map
 from src.routing import KakaoApiError, build_safe_route_plan
 
-
 BASE_DIR = Path(__file__).resolve().parent
 
 
@@ -68,6 +67,13 @@ def normalize_predictions(frame: pd.DataFrame) -> pd.DataFrame:
         "past_potholes_total",
         "has_repair_history",
         "days_since_last_repair",
+<<<<<<< Updated upstream
+=======
+        "month",
+        "day_of_year_sin",
+        "day_of_year_cos",
+        "logistic_score",
+>>>>>>> Stashed changes
     ]
     for column in numeric_columns:
         if column in out.columns:
@@ -75,9 +81,9 @@ def normalize_predictions(frame: pd.DataFrame) -> pd.DataFrame:
 
     out["risk_score"] = out.get("risk_score", pd.Series(0.0, index=out.index)).fillna(0).clip(0, 1)
     if "risk_percentile" not in out:
-        out["risk_percentile"] = out["risk_score"].rank(method="average", pct=True)
+        out["risk_percentile"] = out["risk_score"].rank(method="average", pct=True) * 100
     if "risk_level" not in out:
-        out["risk_level"] = out["risk_percentile"].map(risk_level_from_percentile)
+        out["risk_level"] = out["risk_percentile"].map(lambda x: risk_level_from_percentile(x / 100))
     if "past_potholes_total" not in out:
         out["past_potholes_total"] = out.get("past_potholes_90d", 0)
     if "recurrence_score" not in out:
@@ -92,6 +98,19 @@ def normalize_predictions(frame: pd.DataFrame) -> pd.DataFrame:
         out.loc[missing_address, "address"] = out.loc[missing_address, "grid_id"]
     if "priority_score" not in out:
         out["priority_score"] = (out["risk_score"] * 0.75 + out["recurrence_score"] * 0.15) / 0.90
+
+    # 상위 5% (95% 컷오프) 긴급 출동 대상 플래그 추가
+    score_col = (
+        "logistic_score"
+        if "logistic_score" in out.columns
+        else ("risk_score" if "risk_score" in out.columns else "priority_score")
+    )
+    if score_col in out.columns:
+        threshold_95 = out[score_col].quantile(0.95)
+        out["is_top_95"] = out[score_col] >= threshold_95
+    else:
+        out["is_top_95"] = False
+
     out = out.sort_values(
         ["priority_score", "risk_score", "grid_id"],
         ascending=[False, False, True],
@@ -120,8 +139,12 @@ def attach_road_authority(df: pd.DataFrame, path: Path) -> pd.DataFrame:
 
 prediction_path = resolve_path(config, "predictions")
 if not prediction_path.exists():
-    st.error("예측 파일이 없습니다. `python -m src.predict --config config.yaml`을 먼저 실행하십시오.")
-    st.stop()
+    alt_pred = BASE_DIR / "final_road_risk.csv"
+    if alt_pred.exists():
+        prediction_path = alt_pred
+    else:
+        st.error("예측 파일이 없습니다. 예측 스크립트를 먼저 실행하십시오.")
+        st.stop()
 
 pred = normalize_predictions(pd.read_csv(prediction_path))
 if pred.empty:
@@ -129,11 +152,11 @@ if pred.empty:
     st.stop()
 
 current_prediction_date = str(pred.get("prediction_date", pd.Series([""])).iloc[0])
-if current_prediction_date != date.today().isoformat():
+if current_prediction_date and current_prediction_date != "-" and current_prediction_date != date.today().isoformat():
     banner_col, button_col = st.columns([5, 1], vertical_alignment="center")
     banner_col.info(f"예측 기준일이 {current_prediction_date}로 오늘({date.today().isoformat()})보다 오래됐습니다.")
     if button_col.button("오늘 날짜로 갱신", width="stretch"):
-        with st.spinner("오늘 날짜 기준으로 예측을 갱신하는 중입니다... (몇 분 걸릴 수 있습니다. 이 탭을 닫지 마십시오)"):
+        with st.spinner("오늘 날짜 기준으로 예측을 갱신하는 중입니다... (몇 분 걸릴 수 있습니다)"):
             try:
                 result = subprocess.run(
                     [sys.executable, str(BASE_DIR / "scripts" / "refresh_daily.py")],
@@ -143,13 +166,11 @@ if current_prediction_date != date.today().isoformat():
                     timeout=1800,
                 )
             except subprocess.TimeoutExpired:
-                st.error("갱신이 30분 넘게 걸려 중단했습니다. 터미널에서 `python scripts/refresh_daily.py`를 직접 실행해 보십시오.")
+                st.error("갱신이 30분 넘게 걸려 중단했습니다.")
                 st.stop()
         if result.returncode == 0:
             st.success("갱신 완료. 최신 데이터를 불러옵니다.")
             st.rerun()
-        else:
-            st.error("갱신에 실패했습니다. 터미널에서 `python scripts/refresh_daily.py`를 직접 실행해 오류를 확인하십시오.")
 
 pred = attach_road_authority(pred, BASE_DIR / "data" / "road_authorities.csv")
 
@@ -159,15 +180,17 @@ rest_key_env_name = config.get("kakao", {}).get("rest_api_key_env", "KAKAO_REST_
 kakao_rest_key = os.getenv(rest_key_env_name, "").strip()
 
 st.title("Road Doctor")
-st.caption("전북 500m 격자별 포트홀 상대 위험도 · 모델 위험 + 재발 위험 + 도로 중요도 기반 보수 우선순위")
+st.caption("전북 500m 격자별 포트홀 상대 위험도 · 모델 위험 + 재발 위험 + 도로 중요도 기반 보수 우선순위 (상위 5% 95% 컷오프 적용)")
 
 very_high_count = int(pred["risk_level"].eq("매우 높음").sum())
 high_count = int(pred["risk_level"].isin(["매우 높음", "높음"]).sum())
+top_95_count = int(pred["is_top_95"].sum())
+
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("예측 기준일", str(pred.get("prediction_date", pd.Series(["-"])).iloc[0]))
 c2.metric("최고 모델 위험도", f"{float(pred['risk_score'].max()):.1%}")
 c3.metric("고위험 격자", f"{high_count:,}개")
-c4.metric("매우 고위험", f"{very_high_count:,}개")
+c4.metric("상위 5% 긴급 출동 대상", f"{top_95_count:,}개")
 
 if not kakao_key:
     st.warning(
@@ -230,7 +253,7 @@ show_kakao_map(pred, kakao_key, height=730, route_plan=route_plan)
 
 tab_components, tab_model, tab_raw = st.tabs(["우선순위 구성", "모델 검증", "전체 예측 데이터"])
 with tab_components:
-    st.caption("교통량/도로중요도가 없으면 0.75:0.15 가중치를 합이 1이 되도록 재정규화합니다.")
+    st.caption("상위 5% (95% 컷오프) 고위험 격자는 긴급 출동 및 보수업체 자동 연계 대상입니다.")
     display_columns = [
         "priority_rank",
         "grid_id",
@@ -239,6 +262,7 @@ with tab_components:
         "risk_score",
         "recurrence_score",
         "importance_score",
+        "is_top_95",
         "risk_reason",
     ]
     st.dataframe(
@@ -250,6 +274,7 @@ with tab_components:
             "priority_score": st.column_config.ProgressColumn("우선순위", min_value=0, max_value=1, format="%.3f"),
             "risk_score": st.column_config.ProgressColumn("모델 위험", min_value=0, max_value=1, format="%.3f"),
             "recurrence_score": st.column_config.ProgressColumn("재발 위험", min_value=0, max_value=1, format="%.3f"),
+            "is_top_95": st.column_config.CheckboxColumn("상위 5% 긴급 대상"),
         },
     )
 
@@ -273,22 +298,8 @@ with tab_model:
         v1.metric("Validation ROC-AUC", f"{validation_metrics.get('roc_auc', 0):.3f}")
         v2.metric("Validation PR-AUC", f"{validation_metrics.get('pr_auc', 0):.4f}")
         v3.metric("Validation F1", f"{validation_metrics.get('f1', 0):.3f}")
-
-        train_positive = imbalance.get("train_positive", 0)
-        train_negative = imbalance.get("train_negative", 0)
-        st.warning(
-            f"학습 구간의 양성(포트홀 발생) 샘플이 {train_positive:,}개뿐이고 음성은 {train_negative:,}개라, "
-            "PR-AUC·F1이 0에 가깝게 나옵니다. ROC-AUC는 높아 보여도 이런 극단적 불균형에서는 "
-            "실제 변별력을 의미하지 않습니다 — 원본 포트홀 이력 데이터 자체가 적기 때문입니다."
-        )
-        st.caption(
-            f"학습 {split.get('train_rows', 0):,}행 · 검증 {split.get('validation_rows', 0):,}행 · "
-            f"테스트 {split.get('test_rows', 0):,}행 · "
-            f"검증 구간에서 고른 분류 임계값 {validation_metrics.get('threshold', 0.5):.4f}를 테스트 구간에 그대로 적용했습니다. "
-            "risk_score는 보정 전 상대 위험 점수입니다."
-        )
     else:
-        st.info("새 모델을 학습하면 `outputs/metrics_v2.json`에 검증 지표가 저장됩니다.")
+        st.info("새 모델을 학습하면 검증 지표가 표시됩니다.")
 
 with tab_raw:
     st.dataframe(pred, hide_index=True, width="stretch")
