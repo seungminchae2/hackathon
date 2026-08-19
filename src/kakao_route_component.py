@@ -10,12 +10,11 @@ import streamlit.components.v1 as components
 
 MAP_COLUMNS = [
     "grid_id",
-    "address",
-    "road_authority_dept",
-    "road_authority_phone",
     "grid_lat",
     "grid_lon",
     "risk_score",
+    "risk_percentile",
+    "is_top_95",
     "risk_level",
     "risk_reason",
     "priority_score",
@@ -33,7 +32,7 @@ MAP_COLUMNS = [
 
 _COMPONENT_DIR = Path(__file__).resolve().parent / "kakao_component"
 _KAKAO_MAP_COMPONENT = components.declare_component(
-    "road_doctor_kakao_route_map_v3",
+    "road_doctor_kakao_map_v2",
     path=str(_COMPONENT_DIR),
 )
 
@@ -44,7 +43,25 @@ def _records_for_map(predictions: pd.DataFrame) -> list[dict]:
         if column not in frame.columns:
             frame[column] = None
     frame = frame[MAP_COLUMNS].replace({np.nan: None})
-    return frame.to_dict(orient="records")
+    
+    # 넘파이/판다스 타입을 순수 파이썬 기본형(bool, float, int)으로 강제 변환하여 
+    # Streamlit 컴포넌트 간 JSON 직렬화 오류를 원천 차단합니다.
+    records = []
+    for row in frame.to_dict(orient="records"):
+        clean_row = {}
+        for k, v in row.items():
+            if v is None:
+                clean_row[k] = None
+            elif isinstance(v, (np.bool_, bool)):
+                clean_row[k] = bool(v)
+            elif isinstance(v, (np.integer, int)):
+                clean_row[k] = int(v)
+            elif isinstance(v, (np.floating, float)):
+                clean_row[k] = float(v)
+            else:
+                clean_row[k] = v
+        records.append(clean_row)
+    return records
 
 
 def show_kakao_map(
@@ -53,6 +70,7 @@ def show_kakao_map(
     height: int = 730,
     route_plan: dict[str, Any] | None = None,
 ) -> None:
+    """동일 출처의 Streamlit 컴포넌트로 카카오 지도와 보수 목록을 표시합니다."""
     _KAKAO_MAP_COMPONENT(
         rows=_records_for_map(predictions),
         appKey=app_key.strip(),

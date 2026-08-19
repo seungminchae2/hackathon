@@ -236,3 +236,19 @@ print("\n머신러닝 학습 데이터 생성 완료!")
 print(f"저장 위치: {OUTPUT_FILE}")
 print(f"전체 행 수: {len(training):,}")
 print(f"양성(포트홀 발생) 샘플 수: {int(training['pothole_label'].sum()):,}")
+
+# make_training_data.py의 13번 항목(학습 피처 선택) 부분을 아래 내용으로 교체하세요.
+
+# [추가할 피처 생성 로직]
+risk['rain_change_rate'] = risk['rain_7d'] / (risk['rain_14d'] / 2 + 1e-6)
+risk['freeze_thaw_spike'] = (risk['freeze_thaw_14d'] > 5).astype(int)
+
+# [최종 학습 피처 리스트]
+training_columns = [
+    "point_id", "date", "lat", "lon",
+    "freeze_thaw_14d", "freeze_thaw_spike",  # 보강된 동결융해
+    "rain_7d", "rain_14d", "rain_change_rate", # 보강된 강수
+    "sewer_old30_ratio",
+    "has_past_repair", "days_since_last_repair",
+    "pothole_label"
+]

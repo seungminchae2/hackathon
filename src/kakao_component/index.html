@@ -50,8 +50,6 @@
     .detail-authority .label { font-size:11px; font-weight:700; color:#27500a; margin-bottom:4px; }
     .detail-authority .dept, .detail-authority .phone { font-size:13px; color:#173404; }
     .detail-authority .phone { margin-top:2px; }
-    .marker { transform:translate(-50%,-50%); border:2px solid #fff; border-radius:50%; box-shadow:0 3px 10px rgba(0,0,0,.24); cursor:pointer; transition:transform .16s; }
-    .marker:hover, .marker.selected { transform:translate(-50%,-50%) scale(1.32); z-index:5; }
     .danger-ring { width:18px; height:18px; border:3px solid #d93b36; border-radius:50%; box-shadow:0 0 0 3px rgba(217,59,54,.18); pointer-events:none; transition:opacity .15s, transform .15s; }
     .danger-ring.ring-hidden { opacity:0; transform:scale(.4); }
     .route-pin { display:grid; place-items:center; width:30px; height:30px; transform:translate(-50%,-100%); border:3px solid #fff; border-radius:50% 50% 50% 4px; rotate:-45deg; color:#fff; font-size:11px; font-weight:850; box-shadow:0 3px 12px rgba(0,0,0,.28); }
@@ -95,7 +93,7 @@
     let selectedMarker = null;
     const routeObjects = [];
     let dangerRingEls = [];
-    const DANGER_RING_MAX_LEVEL = 8; // 이 레벨보다 넓게(시·군 단위로) 보일 때는 위험 링을 숨깁니다.
+    const DANGER_RING_MAX_LEVEL = 8;
     const colors = {"매우 높음":"#d93b36","높음":"#ed7a2c","보통":"#e7b642","낮음":"#3d8b68"};
 
     const pct = v => Number.isFinite(Number(v)) ? `${(Number(v)*100).toFixed(1)}%` : "-";
@@ -115,12 +113,12 @@
 
     function renderList() {
       const filtered = filteredRows();
-      document.getElementById("countText").textContent = `${filtered.length.toLocaleString("ko-KR")}개 격자 · priority_score 순`;
+      document.getElementById("countText").textContent = `${filtered.length.toLocaleString("ko-KR")}개 격자 · risk_score 순`;
       document.getElementById("list").innerHTML = filtered.length ? filtered.map(r => `
         <button class="card ${selectedId === r.grid_id ? "active" : ""}" data-id="${esc(r.grid_id)}">
           <span class="rank">${esc(r.priority_rank)}</span>
           <span><span class="name">${esc(label(r))}</span><span class="reason">${esc(r.risk_reason)}</span></span>
-          <span class="scores"><span class="score">${pct(r.priority_score)}</span><span class="level" style="color:${colors[r.risk_level] || "#66756f"}">${esc(r.risk_level)}</span></span>
+          <span class="scores"><span class="score">${pct(r.risk_score)}</span><span class="level" style="color:${colors[r.risk_level] || "#66756f"}">${esc(r.risk_level)}</span></span>
         </button>`).join("") : '<div class="empty-list">조건에 맞는 격자가 없습니더.</div>';
       document.querySelectorAll(".card").forEach(el => el.addEventListener("click", () => selectRow(el.dataset.id, true)));
     }
@@ -273,19 +271,42 @@
       kakao.maps.event.addListener(map, "zoom_changed", updateDangerRingVisibility);
       const HIGH_RISK_LEVELS = new Set(["매우 높음", "높음"]);
       const clusterMarkers = {high: [], normal: []};
+      
       valid.forEach(r => {
         const size = Math.round(14 + Number(r.risk_score || 0) * 14);
         const color = colors[r.risk_level] || "#3d8b68";
-        const marker = new kakao.maps.Marker({
-          position: new kakao.maps.LatLng(Number(r.grid_lat), Number(r.grid_lon)),
-          image: markerImage(color, size, false),
-          title: `${label(r)} · 위험도 ${pct(r.risk_score)}`,
-          zIndex: Number(r.priority_rank) <= 20 ? 3 : 1,
-        });
-        kakao.maps.event.addListener(marker, "click", () => selectRow(r.grid_id, false));
-        markersById.set(String(r.grid_id), {marker, color, size});
-        (HIGH_RISK_LEVELS.has(r.risk_level) ? clusterMarkers.high : clusterMarkers.normal).push(marker);
+        
+        let marker;
+        // 상위 5% 격자(is_top_95)인 경우, 원형 마커 대신 숫자가 박힌 커스텀 HTML 배지로 직접 생성!
+        if (r.is_top_95 && Number.isFinite(Number(r.risk_percentile))) {
+          const badgeEl = document.createElement("div");
+          badgeEl.style.cssText = "background-color:#d93b36; color:white; padding:3px 7px; border-radius:12px; font-size:11px; font-weight:850; border:2px solid white; box-shadow:0 3px 8px rgba(0,0,0,0.35); transform:translate(-50%, -50%); white-space:nowrap; cursor:pointer;";
+          badgeEl.textContent = Math.round(Number(r.risk_percentile));
+          badgeEl.title = `${label(r)} · 상위 백분위 ${Math.round(r.risk_percentile)}%`;
+          badgeEl.addEventListener("click", () => selectRow(r.grid_id, false));
+
+          marker = new kakao.maps.CustomOverlay({
+            position: new kakao.maps.LatLng(Number(r.grid_lat), Number(r.grid_lon)),
+            content: badgeEl,
+            zIndex: 10,
+          });
+          marker.setMap(map);
+          markersById.set(String(r.grid_id), {marker: { setImage: () => {}, setZIndex: () => {} }, color, size});
+          clusterMarkers.high.push(marker); // 클러스터러용 가상 처리 또는 리스트 관리
+        } else {
+          // 일반 격자는 기존 마커 사용
+          marker = new kakao.maps.Marker({
+            position: new kakao.maps.LatLng(Number(r.grid_lat), Number(r.grid_lon)),
+            image: markerImage(color, size, false),
+            title: `${label(r)} · 위험도 ${pct(r.risk_score)}`,
+            zIndex: 1,
+          });
+          kakao.maps.event.addListener(marker, "click", () => selectRow(r.grid_id, false));
+          markersById.set(String(r.grid_id), {marker, color, size});
+          (HIGH_RISK_LEVELS.has(r.risk_level) ? clusterMarkers.high : clusterMarkers.normal).push(marker);
+        }
       });
+
       const clusterStyle = textColor => [{
         width: "40px", height: "40px", lineHeight: "40px",
         background: "rgba(13,107,79,.85)", color: textColor,
@@ -297,7 +318,7 @@
           disableClickZoom: false, styles: clusterStyle("#fff"),
         }),
         new kakao.maps.MarkerClusterer({
-          map, markers: clusterMarkers.high, averageCenter: false, gridSize: 160, minLevel: 6,
+          map, markers: clusterMarkers.high.filter(m => m instanceof kakao.maps.Marker), averageCenter: false, gridSize: 160, minLevel: 6,
           disableClickZoom: false, styles: clusterStyle("#ff5c4d"),
         }),
       ];
@@ -316,7 +337,7 @@
 
     window.addEventListener("message", event => {
       if (event.data?.type !== "streamlit:render") return;
-      rows = Array.isArray(event.data.args?.rows) ? event.data.args.rows : [];
+      rows = Array.isArray(event.data.args?.rows) ? event.data.args?.rows : [];
       kakaoKey = String(event.data.args?.appKey || "");
       routePlan = event.data.args?.routePlan || null;
       const height = Number(event.data.args?.componentHeight || 730);
