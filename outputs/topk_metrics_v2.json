@@ -1,0 +1,47 @@
+{
+  "test_rows": 1927240,
+  "test_positive": 381,
+  "base_rate": 0.00019769203627986135,
+  "top_k": {
+    "top_1": {
+      "percent": 0.01,
+      "rows": 19273,
+      "captured": 159,
+      "total_positive": 381,
+      "capture_rate": 0.41732283464566927,
+      "lift": 41.73098427035333
+    },
+    "top_5": {
+      "percent": 0.05,
+      "rows": 96362,
+      "captured": 176,
+      "total_positive": 381,
+      "capture_rate": 0.46194225721784776,
+      "lift": 9.238845144356956
+    },
+    "top_10": {
+      "percent": 0.1,
+      "rows": 192724,
+      "captured": 176,
+      "total_positive": 381,
+      "capture_rate": 0.46194225721784776,
+      "lift": 4.619422572178478
+    },
+    "top_20": {
+      "percent": 0.2,
+      "rows": 385448,
+      "captured": 177,
+      "total_positive": 381,
+      "capture_rate": 0.4645669291338583,
+      "lift": 2.3228346456692917
+    },
+    "top_30": {
+      "percent": 0.3,
+      "rows": 578172,
+      "captured": 178,
+      "total_positive": 381,
+      "capture_rate": 0.4671916010498688,
+      "lift": 1.5573053368328957
+    }
+  }
+}
