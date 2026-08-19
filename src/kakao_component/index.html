@@ -86,6 +86,7 @@
     let rows = [];
     let kakaoKey = "";
     let routePlan = null;
+    let selectedRouteId = null;
     let map = null;
     let selectedId = null;
     let initialized = false;
@@ -211,28 +212,31 @@
       clearRoutes();
       if (!routePlan || !Array.isArray(routePlan.routes) || !routePlan.routes.length) return;
 
+      const activeId = selectedRouteId || routePlan.recommended_id;
       const bounds = new kakao.maps.LatLngBounds();
-      const ordered = [...routePlan.routes].sort((a,b) => Number(a.selected) - Number(b.selected));
+      const ordered = [...routePlan.routes].sort((a,b) => Number(a.id === activeId) - Number(b.id === activeId));
       ordered.forEach(route => {
+        const isActive = route.id === activeId;
         const path = (route.path || []).map(point => {
           const latlng = new kakao.maps.LatLng(Number(point[1]), Number(point[0]));
-          bounds.extend(latlng);
+          if (isActive) bounds.extend(latlng);
           return latlng;
         });
         if (path.length < 2) return;
         const line = new kakao.maps.Polyline({
           path,
-          strokeWeight:route.selected ? 8 : 4,
-          strokeColor:route.color || "#64748b",
-          strokeOpacity:route.selected ? .95 : .55,
+          strokeWeight:isActive ? 7 : 5,
+          strokeColor:isActive ? "#2563eb" : "#9aa5b1",
+          strokeOpacity:isActive ? .95 : .75,
           strokeStyle:"solid",
+          zIndex:isActive ? 6 : 2,
         });
         line.setMap(map);
         routeObjects.push(line);
       });
 
-      const recommended = routePlan.routes.find(route => route.id === routePlan.recommended_id) || routePlan.routes[0];
-      (recommended.danger_points || []).forEach(point => {
+      const activeRoute = routePlan.routes.find(route => route.id === activeId) || routePlan.routes[0];
+      (activeRoute.danger_points || []).forEach(point => {
         const ring = document.createElement("div");
         ring.className = "danger-ring";
         ring.style.pointerEvents = "auto";
@@ -260,7 +264,10 @@
 
       const badge = document.getElementById("routeBadge");
       badge.style.display = "block";
-      badge.innerHTML = `<b>${esc(recommended.label)}</b><span>${esc(routePlan.message)}</span>`;
+      const badgeSub = activeId === routePlan.recommended_id
+        ? routePlan.message
+        : `${Math.round(activeRoute.duration_s/60)}분 · ${(activeRoute.distance_m/1000).toFixed(1)}km · 위험 격자 ${activeRoute.high_risk_count}개`;
+      badge.innerHTML = `<b>${esc(activeRoute.label)}</b><span>${esc(badgeSub)}</span>`;
     }
 
     function initMap() {
@@ -319,6 +326,7 @@
       rows = Array.isArray(event.data.args?.rows) ? event.data.args.rows : [];
       kakaoKey = String(event.data.args?.appKey || "");
       routePlan = event.data.args?.routePlan || null;
+      selectedRouteId = event.data.args?.selectedRouteId || null;
       const height = Number(event.data.args?.componentHeight || 730);
       send("streamlit:setFrameHeight", {height});
       if (!initialized) { initialized = true; initialize(); } else { renderList(); renderRoutePlan(); }

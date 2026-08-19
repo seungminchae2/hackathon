@@ -200,33 +200,64 @@ if route_submitted:
     else:
         try:
             with st.spinner("대안 경로와 포트홀 위험 구간을 비교하고 있습니더..."):
-                st.session_state["safe_route_plan"] = build_safe_route_plan(
+                new_plan = build_safe_route_plan(
                     origin_query,
                     destination_query,
                     kakao_rest_key,
                     pred,
                 )
+            st.session_state["safe_route_plan"] = new_plan
+            st.session_state["selected_route_id"] = new_plan["recommended_id"]
         except KakaoApiError as exc:
             st.session_state.pop("safe_route_plan", None)
             st.error(str(exc))
 
 route_plan = st.session_state.get("safe_route_plan")
+selected_route_id = None
 if route_plan:
-    recommended = route_plan["recommended"]
     if route_plan["is_detour"]:
         st.success(f"안전 우회 경로 추천: {route_plan['message']}")
     else:
         st.info(route_plan["message"])
+
+    routes = route_plan["routes"]
+    selected_route_id = st.session_state.get("selected_route_id")
+    if selected_route_id not in {r["id"] for r in routes}:
+        selected_route_id = route_plan["recommended_id"]
+        st.session_state["selected_route_id"] = selected_route_id
+
+    st.caption("경로를 선택하면 아래 지도에 파란색으로 강조 표시되고, 나머지는 회색으로 표시됩니다.")
+    route_cols = st.columns(len(routes))
+    for col, route in zip(route_cols, routes):
+        is_selected = route["id"] == selected_route_id
+        with col.container(border=True):
+            badge = " ⭐ 추천" if route["id"] == route_plan["recommended_id"] else ""
+            st.markdown(f"**{route['label']}**{badge}")
+            st.markdown(
+                f"{route['duration_s']/60:.0f}분 · {route['distance_m']/1000:.1f}km · "
+                f"위험 격자 {route['high_risk_count']}개"
+            )
+            if st.button(
+                "선택됨" if is_selected else "이 경로 선택",
+                key=f"route_pick_{route['id']}",
+                type="primary" if is_selected else "secondary",
+                width="stretch",
+                disabled=is_selected,
+            ):
+                st.session_state["selected_route_id"] = route["id"]
+                st.rerun()
+
+    selected_route = next(r for r in routes if r["id"] == selected_route_id)
     route_m1, route_m2, route_m3, route_m4 = st.columns(4)
-    route_m1.metric("추천 경로", recommended["label"])
-    route_m2.metric("예상 시간", f"{recommended['duration_min']:.0f}분")
-    route_m3.metric("이동 거리", f"{recommended['distance_km']:.1f}km")
-    route_m4.metric("고위험 격자", f"{recommended['high_risk_count']}개")
-    road_names = recommended.get("road_names") or []
+    route_m1.metric("선택한 경로", selected_route["label"])
+    route_m2.metric("예상 시간", f"{selected_route['duration_s']/60:.0f}분")
+    route_m3.metric("이동 거리", f"{selected_route['distance_m']/1000:.1f}km")
+    route_m4.metric("고위험 격자", f"{selected_route['high_risk_count']}개")
+    road_names = selected_route.get("road_names") or []
     if road_names:
         st.caption("주요 통과 도로: " + " · ".join(road_names))
 
-show_kakao_map(pred, kakao_key, height=730, route_plan=route_plan)
+show_kakao_map(pred, kakao_key, height=730, route_plan=route_plan, selected_route_id=selected_route_id)
 
 tab_components, tab_model, tab_raw = st.tabs(["우선순위 구성", "모델 검증", "전체 예측 데이터"])
 with tab_components:
