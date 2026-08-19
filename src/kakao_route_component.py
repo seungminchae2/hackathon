@@ -29,6 +29,9 @@ MAP_COLUMNS = [
     "past_potholes_total",
     "has_repair_history",
     "days_since_last_repair",
+    "action_level",
+    "manual_completed",
+    "inspection_suppressed",
 ]
 
 _COMPONENT_DIR = Path(__file__).resolve().parent / "kakao_component"
@@ -51,10 +54,11 @@ def show_kakao_map(
     predictions: pd.DataFrame,
     app_key: str,
     height: int = 730,
-) -> None:
-    _KAKAO_MAP_COMPONENT(
+) -> dict | None:
+    return _KAKAO_MAP_COMPONENT(
         rows=_records_for_map(predictions),
         appKey=app_key.strip(),
         componentHeight=height,
         default=None,
+        key="road_doctor_map",
     )
