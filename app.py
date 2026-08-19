@@ -34,14 +34,59 @@ def load_app_env(path: Path) -> None:
 load_app_env(BASE_DIR / ".env")
 config = load_config(BASE_DIR / "config.yaml")
 
-st.set_page_config(page_title="Road Doctor", page_icon="🛣️", layout="wide")
+st.set_page_config(page_title="전북 특별 민원창구", page_icon="🛣️", layout="wide")
 st.markdown(
     """
     <style>
-    .block-container {padding-top: 2rem; padding-bottom: 3rem; max-width: 1500px;}
+    .block-container {padding-top: 3rem; padding-bottom: 3rem; padding-left: 2rem; padding-right: 2rem; max-width: 100%;}
     [data-testid="stMetric"] {background:#f7f9f6; border:1px solid #e2e8e3; padding:14px 16px; border-radius:14px;}
     [data-testid="stMetric"] * {color:#10231c !important;}
+    .st-key-rd-top-metrics [data-testid="stMetric"] {text-align:right;}
+    .st-key-rd-top-metrics [data-testid="stMetricValue"] {font-size:29px;}
+    .st-key-rd-top-metrics [data-testid="stMetricLabel"] {font-size:11px; justify-content:flex-end;}
     h1 {letter-spacing:-0.04em;}
+
+    .rd-header {margin-top: 0.2rem; margin-bottom: 1.2rem; line-height: 1.6;}
+    .rd-header .rd-title {font-size: 1.35rem; font-weight: 800; letter-spacing: -0.03em; color:#10231c; display:block;}
+    .rd-header .rd-caption {font-size: 0.78rem; color:#5b6b63; display:block; margin-top:4px;}
+
+    .rd-board-title {font-size: 1.0rem; font-weight: 700; margin-bottom: 0.4rem; color:#10231c;}
+    .rd-board-sub {font-size: 0.75rem; color:#7a8a82; margin-bottom: 0.6rem;}
+    .rd-item {padding: 8px 4px; border-bottom: 1px solid #ecefec; animation: rd-slide-in 0.45s cubic-bezier(.2,.8,.3,1) both;}
+    .rd-item:last-child {border-bottom: none;}
+
+    @keyframes rd-slide-in {
+        0% {transform: translateY(16px); opacity: 0;}
+        100% {transform: translateY(0); opacity: 1;}
+    }
+    .rd-item:nth-child(1) {animation-delay: 0s;}
+    .rd-item:nth-child(2) {animation-delay: .04s;}
+    .rd-item:nth-child(3) {animation-delay: .08s;}
+    .rd-item:nth-child(4) {animation-delay: .12s;}
+    .rd-item:nth-child(5) {animation-delay: .16s;}
+    .rd-item:nth-child(6) {animation-delay: .2s;}
+    .rd-item:nth-child(n+7) {animation-delay: .24s;}
+    .rd-item .rd-item-date {font-size: 0.72rem; color:#7a8a82; font-weight:600;}
+    .rd-item .rd-item-address {font-size: 0.86rem; color:#10231c; font-weight:600; margin: 1px 0;}
+    .rd-item .rd-item-meta {font-size: 0.75rem; color:#5b6b63;}
+    .rd-badge {display:inline-block; font-size:0.68rem; font-weight:700; padding:1px 7px; border-radius:999px; margin-right:5px;}
+    .rd-badge-alert {background:#fdeceb; color:#c0392b;}
+    .rd-badge-done {background:#e8f4ee; color:#13795b;}
+    .rd-badge-check {background:#eaf1fb; color:#2c5aa0;}
+    .rd-badge-critical {background:#e0332a; color:#fff;}
+
+    @keyframes rd-flash {
+        0%, 100% {background:#ffe0dd; border-color:#e0332a; box-shadow:0 0 0 0 rgba(224,51,42,.35);}
+        50% {background:#fff6f5; border-color:#f3aca7; box-shadow:0 0 10px 2px rgba(224,51,42,.15);}
+    }
+    .rd-item-critical {
+        animation: rd-slide-in 0.45s cubic-bezier(.2,.8,.3,1) both, rd-flash 1s ease-in-out 0.45s infinite;
+        border: 1.5px solid #e0332a;
+        border-radius: 10px;
+        padding: 8px 10px;
+        margin-bottom: 6px;
+    }
+    .rd-item-critical .rd-item-address {color:#a91e17;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -113,6 +158,65 @@ def normalize_predictions(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def attach_nearest_address(events: pd.DataFrame, grid: pd.DataFrame) -> pd.DataFrame:
+    """이벤트 위경도에서 가장 가까운 격자의 주소를 붙입니다."""
+    out = events.copy()
+    if out.empty or grid.empty or "grid_lat" not in grid.columns:
+        out["address"] = ""
+        return out
+
+    from src.common import haversine_distance_matrix
+
+    distances = haversine_distance_matrix(
+        out["lat"].to_numpy(),
+        out["lon"].to_numpy(),
+        grid["grid_lat"].to_numpy(),
+        grid["grid_lon"].to_numpy(),
+    )
+    nearest_idx = distances.argmin(axis=1)
+    address_source = grid["address"] if "address" in grid.columns else grid["grid_id"]
+    out["address"] = address_source.to_numpy()[nearest_idx]
+    return out
+
+
+def load_recent_events(path: Path, date_column: str, grid: pd.DataFrame, limit: int = 60) -> pd.DataFrame:
+    """포트홀/보수 이력 CSV를 최신순으로 불러오고 주소를 붙입니다."""
+    if not path.exists():
+        return pd.DataFrame()
+    events = pd.read_csv(path)
+    if events.empty:
+        return events
+    events[date_column] = pd.to_datetime(events[date_column], errors="coerce")
+    events = events.dropna(subset=[date_column]).sort_values(date_column, ascending=False).head(limit)
+    return attach_nearest_address(events, grid)
+
+
+def render_board(title: str, subtitle: str, events: pd.DataFrame, date_column: str, badge: str, badge_class: str, height: int, empty_message: str) -> None:
+    st.markdown(f'<div class="rd-board-title">{title}</div><div class="rd-board-sub">{subtitle}</div>', unsafe_allow_html=True)
+    with st.container(height=height, border=True):
+        if events.empty:
+            st.caption(empty_message)
+            return
+        rows_html = []
+        for _, row in events.iterrows():
+            event_date = row[date_column].strftime("%Y-%m-%d") if pd.notna(row[date_column]) else "-"
+            address = row.get("address", "") or "-"
+            meta = row.get("meta_text", "")
+            is_critical = bool(row.get("critical", False))
+            item_class = "rd-item rd-item-critical" if is_critical else "rd-item"
+            item_badge = "🔥 95점 초과" if is_critical else badge
+            item_badge_class = "rd-badge-critical" if is_critical else badge_class
+            rows_html.append(
+                f'<div class="{item_class}">'
+                f'<span class="rd-badge {item_badge_class}">{item_badge}</span>'
+                f'<span class="rd-item-date">{event_date}</span>'
+                f'<div class="rd-item-address">{address}</div>'
+                f'<div class="rd-item-meta">{meta}</div>'
+                f'</div>'
+            )
+        st.markdown("".join(rows_html), unsafe_allow_html=True)
+
+
 def attach_road_authority(df: pd.DataFrame, path: Path) -> pd.DataFrame:
     """주소의 시군명을 기준으로 관할 보수 담당 부서·연락처를 붙입니다."""
     out = df.copy()
@@ -167,16 +271,15 @@ pred = attach_road_authority(pred, BASE_DIR / "data" / "road_authorities.csv")
 key_env_name = config.get("kakao", {}).get("app_key_env", "KAKAO_MAP_APP_KEY")
 kakao_key = os.getenv(key_env_name, "").strip()
 
-st.title("Road Doctor")
-st.caption("전북 500m 격자별 포트홀 상대 위험도 · 모델 위험 + 재발 위험 + 도로 중요도 기반 보수 우선순위")
+st.markdown(
+    '<div class="rd-header">'
+    '<span class="rd-title">전북 특별 민원창구</span>'
+    '<span class="rd-caption">전북 500m 격자별 포트홀 상대 위험도 · 모델 위험 + 재발 위험 + 도로 중요도 기반 보수 우선순위</span>'
+    "</div>",
+    unsafe_allow_html=True,
+)
 
-very_high_count = int(pred["risk_level"].eq("매우 높음").sum())
 high_count = int(pred["risk_level"].isin(["매우 높음", "높음"]).sum())
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("예측 기준일", str(pred.get("prediction_date", pd.Series(["-"])).iloc[0]))
-c2.metric("최고 모델 위험도", f"{float(pred['risk_score'].max()):.1%}")
-c3.metric("고위험 격자", f"{high_count:,}개")
-c4.metric("매우 고위험", f"{very_high_count:,}개")
 
 if not kakao_key:
     st.warning(
@@ -184,7 +287,74 @@ if not kakao_key:
         f"`{key_env_name}=발급받은_JavaScript_키`를 입력하십시오. 목록은 키 없이도 동작합니다."
     )
 
-show_kakao_map(pred, kakao_key, height=730)
+pothole_events = load_recent_events(BASE_DIR / "data" / "potholes.csv", "event_date", pred)
+if not pothole_events.empty:
+    severity_text = pothole_events.get("severity", pd.Series(dtype=object)).apply(
+        lambda value: f"심각도 {int(value)}" if pd.notna(value) else ""
+    )
+    road_text = pothole_events.get("road_name", pd.Series(dtype=object)).fillna("")
+    pothole_events["meta_text"] = (severity_text + " · " + road_text).str.strip(" ·")
+pothole_events["critical"] = False
+
+# TODO: 위험도 점수 체계 도입 후 실제 데이터(위험도 95점 초과)로 교체할 예시 항목입니다.
+critical_example = pd.DataFrame(
+    [
+        {
+            "event_date": pd.Timestamp.now(),
+            "address": "전북특별자치도 전주시 덕진구 백제대로 567 (예시)",
+            "meta_text": "위험도 점수 97점 · 실제 데이터 연동 전 예시 항목입니다",
+            "critical": True,
+        }
+    ]
+)
+pothole_events = pd.concat([critical_example, pothole_events], ignore_index=True)
+
+repair_events = load_recent_events(BASE_DIR / "data" / "repairs.csv", "repair_date", pred)
+if not repair_events.empty:
+    repair_events["meta_text"] = repair_events.get("repair_type", pd.Series(dtype=object)).fillna("")
+
+board_col, map_col = st.columns([1, 2.3], gap="medium")
+
+with board_col:
+    render_board(
+        "🔔 보수 필요 알림",
+        f"최근 포트홀 발생 {len(pothole_events)}건 · 날짜순",
+        pothole_events,
+        "event_date",
+        "발생",
+        "rd-badge-alert",
+        475,
+        "등록된 포트홀 발생 이력이 없습니다.",
+    )
+    render_board(
+        "✅ 보수완료",
+        f"최근 보수완료 {len(repair_events)}건",
+        repair_events,
+        "repair_date",
+        "완료",
+        "rd-badge-done",
+        127,
+        "등록된 보수완료 이력이 없습니다.",
+    )
+    render_board(
+        "🔍 점검완료",
+        "점검 이력 연동 예정",
+        pd.DataFrame(),
+        "inspection_date",
+        "점검",
+        "rd-badge-check",
+        127,
+        "등록된 점검 이력이 없습니다. 데이터 연동 예정입니다.",
+    )
+
+with map_col:
+    with st.container(border=True, key="rd-top-metrics"):
+        m1, m2, m3 = st.columns(3)
+        m1.metric("예측 기준일", str(pred.get("prediction_date", pd.Series(["-"])).iloc[0]))
+        m2.metric("최고 모델 위험도", f"{float(pred['risk_score'].max()):.1%}")
+        m3.metric("고위험 격자", f"{high_count:,}개")
+
+    show_kakao_map(pred, kakao_key, height=800)
 
 tab_components, tab_model, tab_raw = st.tabs(["우선순위 구성", "모델 검증", "전체 예측 데이터"])
 with tab_components:
