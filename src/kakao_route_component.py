@@ -15,6 +15,7 @@ MAP_COLUMNS = [
     "grid_lat",
     "grid_lon",
     "risk_score",
+    "road_risk_score",
     "risk_level",
     "risk_reason",
     "priority_score",

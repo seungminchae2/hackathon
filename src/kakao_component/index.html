@@ -106,7 +106,7 @@
         <button class="card ${selectedId === r.grid_id ? "active" : ""}" data-id="${esc(r.grid_id)}">
           <span class="rank">${esc(r.priority_rank)}</span>
           <span><span class="name">${esc(label(r))}</span><span class="reason">${esc(r.risk_reason)}</span></span>
-          <span class="scores"><span class="score">${pct(r.priority_score)}</span><span class="level" style="color:${colors[r.risk_level] || "#66756f"}">${esc(r.risk_level)}</span></span>
+          <span class="scores"><span class="score">${Number(r.road_risk_score).toFixed(0)}점</span><span class="level" style="color:${colors[r.risk_level] || "#66756f"}">${esc(r.risk_level)}</span></span>
         </button>`).join("") : '<div class="empty-list">조건에 맞는 격자가 없습니더.</div>';
       document.querySelectorAll(".card").forEach(el => el.addEventListener("click", () => selectRow(el.dataset.id, true)));
     }
@@ -148,7 +148,7 @@
       const detail = document.getElementById("detail");
       detail.className = "detail show";
       detail.innerHTML = `<div class="detail-top"><span class="detail-title">#${esc(row.priority_rank)} · ${esc(label(row))}</span><button class="close" aria-label="닫기">×</button></div>
-        <div class="detail-grid"><div class="metric"><b>${pct(row.risk_score)}</b><span>모델 위험도</span></div><div class="metric"><b>${pct(row.recurrence_score)}</b><span>재발 위험</span></div><div class="metric"><b>${pct(row.priority_score)}</b><span>우선순위 점수</span></div><div class="metric"><b>${num(row.precip_7d,"mm")}</b><span>7일 강수</span></div><div class="metric"><b>${num(row.freeze_thaw_7d,"회")}</b><span>동결·융해</span></div><div class="metric"><b>${num(row.past_potholes_total,"건")}</b><span>누적 포트홀</span></div></div>
+        <div class="detail-grid"><div class="metric"><b>${Number(row.road_risk_score).toFixed(0)}점</b><span>도로 위험점수</span></div><div class="metric"><b>${pct(row.recurrence_score)}</b><span>재발 위험</span></div><div class="metric"><b>${pct(row.priority_score)}</b><span>우선순위 점수</span></div><div class="metric"><b>${num(row.precip_7d,"mm")}</b><span>7일 강수</span></div><div class="metric"><b>${num(row.freeze_thaw_7d,"회")}</b><span>동결·융해</span></div><div class="metric"><b>${num(row.past_potholes_total,"건")}</b><span>누적 포트홀</span></div></div>
         <div class="detail-reason"><b>모델 기여 원인</b><br>${esc(row.risk_reason)}</div>${authorityHtml}`;
       detail.querySelector(".close").addEventListener("click", () => { selectedId = null; detail.className="detail"; renderList(); });
       renderList();
@@ -177,7 +177,7 @@
         const marker = new kakao.maps.Marker({
           position: new kakao.maps.LatLng(Number(r.grid_lat), Number(r.grid_lon)),
           image: markerImage(color, size, false),
-          title: `${label(r)} · 위험도 ${pct(r.risk_score)}`,
+          title: `${label(r)} · 위험점수 ${Number(r.road_risk_score).toFixed(0)}점`,
           zIndex: Number(r.priority_rank) <= 20 ? 3 : 1,
         });
         kakao.maps.event.addListener(marker, "click", () => selectRow(r.grid_id, false));
