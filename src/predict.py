@@ -19,7 +19,6 @@ from .features import (
     explain_with_contributions,
     prepare_dataset,
     prepare_feature_matrix,
-    risk_level_from_percentile,
 )
 
 from .train import (
@@ -54,22 +53,14 @@ def percentile_score(
         errors="coerce",
     )
 
-    if (
-        values.notna().sum()
-        == 0
-    ):
+    if values.notna().sum() == 0:
         return pd.Series(
             0.0,
             index=series.index,
             dtype=float,
         )
 
-    if (
-        values.nunique(
-            dropna=True
-        )
-        <= 1
-    ):
+    if values.nunique(dropna=True) <= 1:
         return pd.Series(
             0.0,
             index=series.index,
@@ -93,10 +84,7 @@ def percentile_score(
         ranks.max()
     )
 
-    if (
-        max_rank
-        <= min_rank
-    ):
+    if max_rank <= min_rank:
         return pd.Series(
             0.0,
             index=series.index,
@@ -104,12 +92,40 @@ def percentile_score(
         )
 
     return (
-        ranks
-        - min_rank
+        ranks - min_rank
     ) / (
-        max_rank
-        - min_rank
+        max_rank - min_rank
     )
+
+
+def road_risk_level_from_score(
+    score: float,
+) -> str:
+    if score >= 60:
+        return "매우 높음"
+
+    if score >= 30:
+        return "높음"
+
+    if score >= 20:
+        return "보통"
+
+    return "낮음"
+
+
+def absolute_risk_level_from_score(
+    score: float,
+) -> str:
+    if score >= 80:
+        return "매우 높음"
+
+    if score >= 60:
+        return "높음"
+
+    if score >= 40:
+        return "보통"
+
+    return "낮음"
 
 
 def load_road_attributes() -> pd.DataFrame:
@@ -122,12 +138,8 @@ def load_road_attributes() -> pd.DataFrame:
         },
     )
 
-    attr[
-        "lanes"
-    ] = pd.to_numeric(
-        attr[
-            "lanes"
-        ],
+    attr["lanes"] = pd.to_numeric(
+        attr["lanes"],
         errors="coerce",
     )
 
@@ -143,15 +155,11 @@ def lookup_category_lift(
         {},
     )
 
-    key = str(
-        value
-    )
+    key = str(value)
 
     if key in categories:
         return float(
-            categories[
-                key
-            ].get(
+            categories[key].get(
                 "lift",
                 1.0,
             )
@@ -168,10 +176,7 @@ def normalize_lift_series(
         errors="coerce",
     ).fillna(1.0)
 
-    if (
-        values.nunique()
-        <= 1
-    ):
+    if values.nunique() <= 1:
         return pd.Series(
             0.5,
             index=series.index,
@@ -186,10 +191,7 @@ def normalize_lift_series(
         values.max()
     )
 
-    if (
-        max_value
-        <= min_value
-    ):
+    if max_value <= min_value:
         return pd.Series(
             0.5,
             index=series.index,
@@ -197,11 +199,9 @@ def normalize_lift_series(
         )
 
     return (
-        values
-        - min_value
+        values - min_value
     ) / (
-        max_value
-        - min_value
+        max_value - min_value
     )
 
 
@@ -219,460 +219,557 @@ def calculate_road_structure_score(
             "python -m src.train을 다시 실행하십시오."
         )
 
-    attributes = (
-        load_road_attributes()
+    attributes = load_road_attributes()
+
+    latest = latest.copy()
+
+    latest["grid_id"] = (
+        latest["grid_id"]
+        .astype(str)
     )
 
-    result = latest[
-        [
-            "grid_id"
+    attributes["grid_id"] = (
+        attributes["grid_id"]
+        .astype(str)
+    )
+
+    columns_to_add = [
+        "grid_id",
+        "lanes",
+        "road_rank",
+        "road_type",
+    ]
+
+    existing_columns = [
+        column
+        for column in [
+            "lanes",
+            "road_rank",
+            "road_type",
         ]
-    ].merge(
-        attributes[
-            [
-                "grid_id",
-                "lanes",
-                "road_rank",
-            ]
-        ],
+        if column in latest.columns
+    ]
+
+    if existing_columns:
+        latest = latest.drop(
+            columns=existing_columns
+        )
+
+    latest = latest.merge(
+        attributes[columns_to_add],
         on="grid_id",
         how="left",
     )
 
-    lanes_stats = stats[
-        "lanes"
-    ]
+    lanes_stats = stats.get(
+        "lanes",
+        {},
+    )
 
-    rank_stats = stats[
-        "road_rank"
-    ]
+    road_rank_stats = stats.get(
+        "road_rank",
+        {},
+    )
 
-    result[
-        "lanes_lift"
-    ] = result[
-        "lanes"
-    ].map(
-        lambda value:
-            lookup_category_lift(
+    latest["lanes_lift"] = (
+        latest["lanes"]
+        .apply(
+            lambda value: lookup_category_lift(
                 value,
                 lanes_stats,
             )
+        )
     )
 
-    result[
-        "road_rank_lift"
-    ] = result[
-        "road_rank"
-    ].map(
-        lambda value:
-            lookup_category_lift(
+    latest["road_rank_lift"] = (
+        latest["road_rank"]
+        .apply(
+            lambda value: lookup_category_lift(
                 value,
-                rank_stats,
+                road_rank_stats,
             )
-    )
-
-    result[
-        "lanes_risk_component"
-    ] = normalize_lift_series(
-        result[
-            "lanes_lift"
-        ]
-    )
-
-    result[
-        "road_rank_risk_component"
-    ] = normalize_lift_series(
-        result[
-            "road_rank_lift"
-        ]
-    )
-
-    lanes_weight = float(
-        stats.get(
-            "lanes_weight",
-            0.20,
         )
     )
 
-    rank_weight = float(
-        stats.get(
-            "road_rank_weight",
-            0.80,
+    latest["lanes_structure_component"] = (
+        normalize_lift_series(
+            latest["lanes_lift"]
         )
     )
 
-    denominator = (
-        lanes_weight
-        + rank_weight
+    latest["road_rank_structure_component"] = (
+        normalize_lift_series(
+            latest["road_rank_lift"]
+        )
     )
 
-    if denominator <= 0:
-        lanes_weight = 0.20
-        rank_weight = 0.80
-        denominator = 1.0
-
-    lanes_weight /= (
-        denominator
-    )
-
-    rank_weight /= (
-        denominator
-    )
-
-    result[
-        "road_structure_score"
-    ] = (
-        result[
-            "lanes_risk_component"
+    latest["road_structure_score"] = (
+        0.20
+        * latest[
+            "lanes_structure_component"
         ]
-        * lanes_weight
-        + result[
-            "road_rank_risk_component"
+        + 0.80
+        * latest[
+            "road_rank_structure_component"
         ]
-        * rank_weight
     )
 
-    return result[
-        [
-            "grid_id",
-            "lanes",
-            "road_rank",
-            "lanes_lift",
-            "road_rank_lift",
-            "road_structure_score",
-        ]
-    ]
+    latest["road_structure_score"] = (
+        latest["road_structure_score"]
+        .clip(0.0, 1.0)
+    )
+
+    return latest
 
 
-def calculate_ai_road_risk_score(
+def build_pothole_history_component(
+    latest: pd.DataFrame,
+) -> pd.Series:
+    components = []
+
+    for feature in DISPLAY_POTHOLE_FEATURES:
+        if feature not in latest.columns:
+            continue
+
+        component = percentile_score(
+            latest[feature]
+        )
+
+        components.append(
+            component
+        )
+
+    if not components:
+        return pd.Series(
+            0.0,
+            index=latest.index,
+            dtype=float,
+        )
+
+    matrix = pd.concat(
+        components,
+        axis=1,
+    )
+
+    return matrix.max(
+        axis=1
+    )
+
+
+def build_feature_display_score(
     latest: pd.DataFrame,
     model,
     feature_columns: list[str],
-) -> tuple[
-    pd.Series,
-    pd.DataFrame,
-]:
+) -> tuple[pd.Series, dict[str, float]]:
     importances = np.asarray(
         model.feature_importances_,
         dtype=float,
     )
 
     importance_map = {
-        feature:
-            float(
-                importance
-            )
-        for (
-            feature,
-            importance,
-        ) in zip(
+        feature: float(importance)
+        for feature, importance in zip(
             feature_columns,
             importances,
         )
     }
 
-    components = pd.DataFrame(
-        index=latest.index
+    pothole_importance = sum(
+        importance_map.get(
+            feature,
+            0.0,
+        )
+        for feature in DISPLAY_POTHOLE_FEATURES
     )
 
-    available_pothole_features = [
-        feature
-        for feature
-        in DISPLAY_POTHOLE_FEATURES
-        if (
-            feature in latest.columns
-            and feature
-            in importance_map
-            and latest[
-                feature
-            ].notna().any()
-        )
-    ]
-
-    pothole_parts = []
-
-    for feature in (
-        available_pothole_features
-    ):
-        component = percentile_score(
-            latest[
-                feature
-            ]
-        )
-
-        pothole_parts.append(
-            component
-        )
-
-    if pothole_parts:
-        pothole_history_score = (
-            pd.concat(
-                pothole_parts,
-                axis=1,
-            )
-            .mean(
-                axis=1
-            )
-        )
-
-        pothole_group_importance = max(
-            importance_map.get(
-                feature,
-                0.0,
-            )
-            for feature
-            in available_pothole_features
-        )
-
-    else:
-        pothole_history_score = pd.Series(
-            0.0,
-            index=latest.index,
-            dtype=float,
-        )
-
-        pothole_group_importance = 0.0
-
-    available_other_features = [
-        feature
-        for feature
-        in DISPLAY_OTHER_FEATURES
-        if (
-            feature
-            in latest.columns
-            and feature
-            in importance_map
-            and latest[
-                feature
-            ].notna().any()
-        )
-    ]
-
-    group_weights = {
-        "pothole_history":
-            max(
-                pothole_group_importance,
-                0.0,
-            )
+    group_importances = {
+        "pothole_history": pothole_importance,
     }
 
-    for feature in (
-        available_other_features
-    ):
-        group_weights[
-            feature
-        ] = max(
-            importance_map.get(
-                feature,
-                0.0,
-            ),
+    for feature in DISPLAY_OTHER_FEATURES:
+        if feature in latest.columns:
+            group_importances[feature] = (
+                importance_map.get(
+                    feature,
+                    0.0,
+                )
+            )
+
+    positive_total = sum(
+        max(
+            value,
             0.0,
         )
-
-    total_weight = sum(
-        group_weights.values()
+        for value in group_importances.values()
     )
 
-    if (
-        total_weight
-        <= 0
-    ):
-        group_weights = {
-            key: 1.0
-            for key
-            in group_weights
+    if positive_total <= 0:
+        weights = {
+            key: 1.0 / len(group_importances)
+            for key in group_importances
+        }
+    else:
+        weights = {
+            key: max(value, 0.0)
+            / positive_total
+            for key, value
+            in group_importances.items()
         }
 
-        total_weight = float(
-            len(
-                group_weights
-            )
+    feature_score = pd.Series(
+        0.0,
+        index=latest.index,
+        dtype=float,
+    )
+
+    pothole_component = (
+        build_pothole_history_component(
+            latest
         )
+    )
 
-    group_weights = {
-        key:
-            value
-            / total_weight
-        for (
-            key,
-            value,
-        ) in group_weights.items()
-    }
-
-    feature_score = (
-        pothole_history_score
-        * group_weights.get(
+    feature_score += (
+        weights.get(
             "pothole_history",
             0.0,
         )
+        * pothole_component
     )
 
-    for feature in (
-        available_other_features
-    ):
+    for feature in DISPLAY_OTHER_FEATURES:
+        if feature not in latest.columns:
+            continue
+
         component = percentile_score(
-            latest[
-                feature
-            ]
+            latest[feature]
         )
 
         feature_score += (
-            component
-            * group_weights[
-                feature
-            ]
-        )
-
-    model_component = (
-        percentile_score(
-            latest[
-                "risk_score"
-            ]
-        )
-    )
-
-    structure_component = (
-        pd.to_numeric(
-            latest[
-                "road_structure_score"
-            ],
-            errors="coerce",
-        )
-        .fillna(0.5)
-        .clip(
-            lower=0.0,
-            upper=1.0,
-        )
-    )
-
-    # 최종 구성
-    #
-    # feature 종합지수 65%
-    # XGBoost 상대위험 20%
-    # 도로 구조 위험 15%
-    #
-    # 도로 구조는 실제 발생률 기반 smoothing 결과를 사용
-    combined_score = (
-        feature_score
-        * 0.65
-        + model_component
-        * 0.20
-        + structure_component
-        * 0.15
-    )
-
-    components[
-        "display_feature_score"
-    ] = feature_score
-
-    components[
-        "display_model_score"
-    ] = model_component
-
-    components[
-        "display_road_structure_score"
-    ] = structure_component
-
-    components[
-        "display_combined_score"
-    ] = combined_score
-
-    if (
-        combined_score.nunique(
-            dropna=True
-        )
-        <= 1
-    ):
-        final_score = pd.Series(
-            50.0,
-            index=latest.index,
-            dtype=float,
-        )
-
-    else:
-        final_rank = (
-            combined_score
-            .rank(
-                method="average",
-                pct=True,
+            weights.get(
+                feature,
+                0.0,
             )
+            * component
         )
-
-        min_rank = float(
-            final_rank.min()
-        )
-
-        max_rank = float(
-            final_rank.max()
-        )
-
-        if (
-            max_rank
-            > min_rank
-        ):
-            final_score = (
-                (
-                    final_rank
-                    - min_rank
-                )
-                / (
-                    max_rank
-                    - min_rank
-                )
-                * 100.0
-            )
-
-        else:
-            final_score = pd.Series(
-                50.0,
-                index=latest.index,
-                dtype=float,
-            )
-
-    final_score = (
-        final_score
-        .clip(
-            lower=0.0,
-            upper=100.0,
-        )
-        .round(1)
-    )
-
-    print()
-    print(
-        "=== 화면용 AI 위험점수 구성 ==="
-    )
-
-    print(
-        "기존 feature 종합지수 : 65%"
-    )
-
-    print(
-        "XGBoost 상대위험      : 20%"
-    )
-
-    print(
-        "도로 구조 위험        : 15%"
-    )
-
-    print()
-
-    print(
-        "도로 구조 내부 비율:"
-    )
-
-    print(
-        " - 도로등급: 80%"
-    )
-
-    print(
-        " - 차로수  : 20%"
-    )
 
     return (
-        final_score,
-        components,
+        feature_score.clip(
+            0.0,
+            1.0,
+        ),
+        weights,
     )
+
+
+def calculate_relative_model_score(
+    risk_score: pd.Series,
+) -> pd.Series:
+    return percentile_score(
+        risk_score
+    )
+
+
+def calculate_absolute_feature_component(
+    latest: pd.DataFrame,
+) -> pd.Series:
+    result = pd.Series(
+        0.0,
+        index=latest.index,
+        dtype=float,
+    )
+
+    pothole_30 = pd.to_numeric(
+        latest.get(
+            "past_potholes_30d",
+            0,
+        ),
+        errors="coerce",
+    ).fillna(0)
+
+    pothole_90 = pd.to_numeric(
+        latest.get(
+            "past_potholes_90d",
+            0,
+        ),
+        errors="coerce",
+    ).fillna(0)
+
+    pothole_total = pd.to_numeric(
+        latest.get(
+            "past_potholes_total",
+            0,
+        ),
+        errors="coerce",
+    ).fillna(0)
+
+    repair_days = pd.to_numeric(
+        latest.get(
+            "days_since_last_repair",
+            0,
+        ),
+        errors="coerce",
+    ).fillna(0)
+
+    freeze = pd.to_numeric(
+        latest.get(
+            "freeze_thaw_7d",
+            0,
+        ),
+        errors="coerce",
+    ).fillna(0)
+
+    precip_7d = pd.to_numeric(
+        latest.get(
+            "precip_7d",
+            0,
+        ),
+        errors="coerce",
+    ).fillna(0)
+
+    snowfall = pd.to_numeric(
+        latest.get(
+            "snowfall",
+            0,
+        ),
+        errors="coerce",
+    ).fillna(0)
+
+    pothole_component = np.maximum.reduce(
+        [
+            np.clip(
+                pothole_30 / 1.0,
+                0,
+                1,
+            ),
+            np.clip(
+                pothole_90 / 1.0,
+                0,
+                1,
+            )
+            * 0.85,
+            np.clip(
+                pothole_total / 3.0,
+                0,
+                1,
+            )
+            * 0.70,
+        ]
+    )
+
+    repair_component = np.clip(
+        repair_days / 365.0,
+        0,
+        1,
+    )
+
+    freeze_component = np.clip(
+        freeze / 5.0,
+        0,
+        1,
+    )
+
+    precip_component = np.clip(
+        precip_7d / 80.0,
+        0,
+        1,
+    )
+
+    snow_component = np.clip(
+        snowfall / 10.0,
+        0,
+        1,
+    )
+
+    result = (
+        0.35 * pothole_component
+        + 0.20 * repair_component
+        + 0.25 * freeze_component
+        + 0.15 * precip_component
+        + 0.05 * snow_component
+    )
+
+    return pd.Series(
+        np.clip(
+            result,
+            0,
+            1,
+        ),
+        index=latest.index,
+    )
+
+
+def build_risk_trigger(
+    row: pd.Series,
+) -> str:
+    triggers = []
+
+    recent30 = float(
+        row.get(
+            "past_potholes_30d",
+            0,
+        )
+        or 0
+    )
+
+    recent90 = float(
+        row.get(
+            "past_potholes_90d",
+            0,
+        )
+        or 0
+    )
+
+    total = float(
+        row.get(
+            "past_potholes_total",
+            0,
+        )
+        or 0
+    )
+
+    repair_days = float(
+        row.get(
+            "days_since_last_repair",
+            0,
+        )
+        or 0
+    )
+
+    freeze = float(
+        row.get(
+            "freeze_thaw_7d",
+            0,
+        )
+        or 0
+    )
+
+    if (
+        recent30 >= 1
+        and freeze >= 3
+    ):
+        triggers.append(
+            "최근30일 포트홀+동결융해 3회 이상"
+        )
+
+    elif (
+        recent90 >= 1
+        and freeze >= 3
+    ):
+        triggers.append(
+            "최근90일 포트홀+동결융해 3회 이상"
+        )
+
+    elif (
+        total >= 1
+        and freeze >= 3
+    ):
+        triggers.append(
+            "과거 포트홀 이력+동결융해 3회 이상"
+        )
+
+    if (
+        total >= 1
+        and repair_days >= 365
+    ):
+        triggers.append(
+            "보수 후 365일 이상"
+        )
+
+    if not triggers:
+        return "없음"
+
+    return "; ".join(
+        triggers
+    )
+
+
+def is_strong_trigger(
+    trigger: str,
+) -> bool:
+    trigger = str(trigger)
+
+    return (
+        "최근30일 포트홀+동결융해 3회 이상"
+        in trigger
+        or
+        "최근90일 포트홀+동결융해 3회 이상"
+        in trigger
+    )
+
+
+def determine_action_level(
+    row: pd.Series,
+) -> str:
+    absolute_score = float(
+        row.get(
+            "absolute_risk_score",
+            0,
+        )
+    )
+
+    relative_top = float(
+        row.get(
+            "relative_top_percent",
+            100,
+        )
+    )
+
+    trigger = str(
+        row.get(
+            "risk_trigger",
+            "없음",
+        )
+    )
+
+    has_trigger = (
+        trigger != "없음"
+    )
+
+    strong_trigger = (
+        is_strong_trigger(
+            trigger
+        )
+    )
+
+    # 예방보수
+    #
+    # 단순히 당일 상대순위가 높다는 이유로
+    # 예방보수하지 않습니다.
+    #
+    # 절대위험 80점 이상
+    # + 강한 실증 Trigger
+    # + 당일 상위 5%를 모두 만족해야 합니다.
+    if (
+        absolute_score >= 80
+        and strong_trigger
+        and relative_top <= 5
+    ):
+        return "예방보수"
+
+    # 긴급점검
+    #
+    # 절대위험이 60 이상이거나,
+    # 과거 데이터에서 매우 높은 Lift가 확인된
+    # 최근 포트홀 + 동결융해 조건일 경우
+    if (
+        absolute_score >= 60
+        or strong_trigger
+    ):
+        return "긴급점검"
+
+    # 우선점검
+    #
+    # 절대위험 40 이상,
+    # 당일 상대위험 상위 5%,
+    # 일반 위험 Trigger 중 하나라도 해당
+    if (
+        absolute_score >= 40
+        or relative_top <= 5
+        or has_trigger
+    ):
+        return "우선점검"
+
+    return "모니터링"
 
 
 def main(
@@ -731,21 +828,15 @@ def main(
         ignore_index=True,
     )
 
-    combined[
-        "date"
-    ] = pd.to_datetime(
-        combined[
-            "date"
-        ],
+    combined["date"] = pd.to_datetime(
+        combined["date"],
         errors="coerce",
     )
 
     combined = (
         combined
         .dropna(
-            subset=[
-                "date"
-            ]
+            subset=["date"]
         )
         .sort_values(
             [
@@ -778,34 +869,17 @@ def main(
             index=False,
         )
 
-        available_dates = (
-            pd.to_datetime(
-                forecast[
-                    "date"
-                ],
-                errors="coerce",
-            )
-            .dropna()
-        )
-
-        if (
-            available_dates.empty
-        ):
-            raise ValueError(
-                "weather_forecast.csv에 "
-                "유효한 예보 날짜가 없습니다."
-            )
+        available_dates = pd.to_datetime(
+            forecast["date"],
+            errors="coerce",
+        ).dropna()
 
         target_date = (
             pd.Timestamp(
                 prediction_date
             ).normalize()
             if prediction_date
-            else (
-                available_dates
-                .max()
-                .normalize()
-            )
+            else available_dates.max().normalize()
         )
 
         prepared = prepare_dataset(
@@ -839,16 +913,13 @@ def main(
             ),
         )
 
-        latest = (
-            prepared.panel.loc[
-                prepared.panel[
-                    "date"
-                ].eq(
-                    target_date
-                )
-            ]
-            .copy()
-        )
+        latest = prepared.panel.loc[
+            prepared.panel[
+                "date"
+            ].eq(
+                target_date
+            )
+        ].copy()
 
         if latest.empty:
             raise ValueError(
@@ -856,46 +927,30 @@ def main(
                 f"{target_date.date()}"
             )
 
-        feature_columns = (
+        feature_columns = bundle[
+            "features"
+        ]
+
+        matrix, _ = prepare_feature_matrix(
+            latest,
+            feature_columns,
             bundle[
-                "features"
-            ]
+                "feature_medians"
+            ],
         )
 
-        matrix, _ = (
-            prepare_feature_matrix(
-                latest,
-                feature_columns,
-                bundle[
-                    "feature_medians"
-                ],
-            )
-        )
+        model = bundle[
+            "model"
+        ]
 
-        model = (
-            bundle[
-                "model"
-            ]
-        )
+        # -----------------------------------------
+        # 1. XGBoost 원본 모델 점수
+        # -----------------------------------------
 
-        latest[
-            "risk_score"
-        ] = (
+        latest["risk_score"] = (
             model.predict_proba(
                 matrix
             )[:, 1]
-        )
-
-        latest[
-            "risk_percentile"
-        ] = (
-            latest[
-                "risk_score"
-            ]
-            .rank(
-                method="average",
-                pct=True,
-            )
         )
 
         latest[
@@ -911,15 +966,263 @@ def main(
             )
         ).astype(int)
 
-        latest[
-            "risk_reason"
-        ] = (
-            explain_with_contributions(
-                model,
-                matrix,
+        # -----------------------------------------
+        # 2. 도로 구조 위험
+        # -----------------------------------------
+
+        latest = (
+            calculate_road_structure_score(
                 latest,
+                bundle,
             )
         )
+
+        # -----------------------------------------
+        # 3. feature 기반 상대위험
+        # -----------------------------------------
+
+        (
+            feature_display_score,
+            display_weights,
+        ) = build_feature_display_score(
+            latest,
+            model,
+            feature_columns,
+        )
+
+        latest[
+            "feature_risk_score"
+        ] = (
+            feature_display_score
+        )
+
+        # -----------------------------------------
+        # 4. XGBoost 당일 상대위험
+        # -----------------------------------------
+
+        latest[
+            "model_relative_score"
+        ] = (
+            calculate_relative_model_score(
+                latest[
+                    "risk_score"
+                ]
+            )
+        )
+
+        # -----------------------------------------
+        # 5. 상대 AI 종합위험지수
+        #
+        # feature 65%
+        # XGBoost 20%
+        # 도로구조 15%
+        # -----------------------------------------
+
+        latest[
+            "relative_ai_index"
+        ] = (
+            0.65
+            * latest[
+                "feature_risk_score"
+            ]
+            + 0.20
+            * latest[
+                "model_relative_score"
+            ]
+            + 0.15
+            * latest[
+                "road_structure_score"
+            ]
+        ).clip(
+            0,
+            1,
+        )
+
+        # 기존 실험에서 확정한 sqrt 변환
+        latest[
+            "road_risk_score"
+        ] = (
+            100
+            * np.sqrt(
+                latest[
+                    "relative_ai_index"
+                ]
+            )
+        ).clip(
+            0,
+            100,
+        ).round(1)
+
+        # -----------------------------------------
+        # 6. 당일 상대순위
+        #
+        # 0에 가까울수록 위험도가 높은 도로
+        # 예: 0.5 = 상위 0.5%
+        # -----------------------------------------
+
+        descending_rank = (
+            latest[
+                "road_risk_score"
+            ]
+            .rank(
+                method="min",
+                ascending=False,
+            )
+        )
+
+        latest[
+            "relative_top_percent"
+        ] = (
+            descending_rank
+            / len(latest)
+            * 100
+        ).round(3)
+
+        latest[
+            "risk_percentile"
+        ] = (
+            latest[
+                "road_risk_score"
+            ]
+            .rank(
+                method="average",
+                pct=True,
+            )
+        )
+
+        latest[
+            "risk_level"
+        ] = (
+            latest[
+                "road_risk_score"
+            ]
+            .apply(
+                road_risk_level_from_score
+            )
+        )
+
+        # -----------------------------------------
+        # 7. 절대 위험점수
+        #
+        # 당일 전체 도로 분포와 관계없이
+        # 실제 feature의 절대 크기로 계산
+        # -----------------------------------------
+
+        latest[
+            "absolute_feature_score"
+        ] = (
+            calculate_absolute_feature_component(
+                latest
+            )
+        )
+
+        # 절대위험에서는 상대순위보다
+        # 실제 환경 조건을 중심으로 계산
+        #
+        # feature 절대위험 75%
+        # 도로구조 위험 15%
+        # 모델 원본 위험 신호 10%
+        model_absolute_signal = (
+            latest[
+                "risk_score"
+            ]
+            .clip(
+                0,
+                1,
+            )
+        )
+
+        latest[
+            "absolute_risk_index"
+        ] = (
+            0.75
+            * latest[
+                "absolute_feature_score"
+            ]
+            + 0.15
+            * latest[
+                "road_structure_score"
+            ]
+            + 0.10
+            * model_absolute_signal
+        ).clip(
+            0,
+            1,
+        )
+
+        latest[
+            "absolute_risk_score"
+        ] = (
+            latest[
+                "absolute_risk_index"
+            ]
+            * 100
+        ).round(1)
+
+        latest[
+            "absolute_risk_level"
+        ] = (
+            latest[
+                "absolute_risk_score"
+            ]
+            .apply(
+                absolute_risk_level_from_score
+            )
+        )
+
+        # -----------------------------------------
+        # 8. 실증 기반 Trigger
+        # -----------------------------------------
+
+        latest[
+            "risk_trigger"
+        ] = (
+            latest.apply(
+                build_risk_trigger,
+                axis=1,
+            )
+        )
+
+        # -----------------------------------------
+        # 9. 최종 조치 단계
+        # -----------------------------------------
+
+        latest[
+            "action_level"
+        ] = (
+            latest.apply(
+                determine_action_level,
+                axis=1,
+            )
+        )
+
+        latest[
+            "preventive_repair_candidate"
+        ] = (
+            latest[
+                "action_level"
+            ]
+            .eq(
+                "예방보수"
+            )
+            .astype(int)
+        )
+
+        # -----------------------------------------
+        # 10. 위험 원인 설명
+        # -----------------------------------------
+
+        latest[
+            "risk_reason"
+        ] = explain_with_contributions(
+            model,
+            matrix,
+            latest,
+        )
+
+        # -----------------------------------------
+        # 11. 기존 보수 우선도
+        # -----------------------------------------
 
         priority = (
             calculate_priority_components(
@@ -936,67 +1239,10 @@ def main(
             )
         )
 
-        for column in (
-            priority.columns
-        ):
-            latest[
-                column
-            ] = priority[
-                column
-            ]
-
-        structure = (
-            calculate_road_structure_score(
-                latest,
-                bundle,
+        for column in priority.columns:
+            latest[column] = (
+                priority[column]
             )
-        )
-
-        latest = (
-            latest
-            .merge(
-                structure,
-                on="grid_id",
-                how="left",
-            )
-        )
-
-        (
-            road_risk_score,
-            display_components,
-        ) = (
-            calculate_ai_road_risk_score(
-                latest,
-                model,
-                feature_columns,
-            )
-        )
-
-        latest[
-            "road_risk_score"
-        ] = (
-            road_risk_score
-        )
-
-        latest[
-            "road_risk_percentile"
-        ] = (
-            latest[
-                "road_risk_score"
-            ]
-            / 100.0
-        )
-
-        latest[
-            "risk_level"
-        ] = (
-            latest[
-                "road_risk_percentile"
-            ]
-            .map(
-                risk_level_from_percentile
-            )
-        )
 
         latest[
             "prediction_date"
@@ -1006,16 +1252,41 @@ def main(
             .isoformat()
         )
 
+        # -----------------------------------------
+        # 12. 조치 우선순위
+        # -----------------------------------------
+
+        action_priority = {
+            "예방보수": 4,
+            "긴급점검": 3,
+            "우선점검": 2,
+            "모니터링": 1,
+        }
+
+        latest[
+            "_action_priority"
+        ] = (
+            latest[
+                "action_level"
+            ]
+            .map(
+                action_priority
+            )
+            .fillna(0)
+        )
+
         latest = (
             latest
             .sort_values(
                 [
+                    "_action_priority",
+                    "absolute_risk_score",
                     "road_risk_score",
                     "priority_score",
-                    "risk_score",
                     "grid_id",
                 ],
                 ascending=[
+                    False,
                     False,
                     False,
                     False,
@@ -1029,38 +1300,84 @@ def main(
         )
 
         latest[
+            "action_rank"
+        ] = (
+            latest.index + 1
+        )
+
+        latest = latest.drop(
+            columns=[
+                "_action_priority"
+            ]
+        )
+
+        # 기존 priority_rank도 별도로 유지
+        priority_order = (
+            latest[
+                "priority_score"
+            ]
+            .rank(
+                method="min",
+                ascending=False,
+            )
+        )
+
+        latest[
             "priority_rank"
         ] = (
-            latest.index
-            + 1
+            priority_order
+            .astype(int)
         )
+
+        # -----------------------------------------
+        # 13. 출력 컬럼
+        # -----------------------------------------
 
         output_columns = [
             "prediction_date",
-
             "grid_id",
             "grid_lat",
             "grid_lon",
 
-            "risk_score",
-            "risk_percentile",
-
             "road_risk_score",
-            "road_risk_percentile",
-
             "risk_level",
+            "risk_percentile",
+            "relative_top_percent",
+
+            "absolute_risk_score",
+            "absolute_risk_level",
+
+            "action_level",
+            "action_rank",
+            "preventive_repair_candidate",
+            "risk_trigger",
+
+            "risk_score",
             "predicted_label",
+
+            "feature_risk_score",
+            "model_relative_score",
+            "relative_ai_index",
+
+            "absolute_feature_score",
+            "absolute_risk_index",
+
+            "road_structure_score",
+            "lanes",
+            "road_rank",
+            "road_type",
+            "lanes_lift",
+            "road_rank_lift",
+
             "risk_reason",
 
             "priority_score",
             "priority_rank",
             "recurrence_score",
-
-            "lanes",
-            "road_rank",
-            "lanes_lift",
-            "road_rank_lift",
-            "road_structure_score",
+            "importance_score",
+            "priority_weight_risk",
+            "priority_weight_recurrence",
+            "priority_weight_importance",
 
             "avg_temp",
             "min_temp",
@@ -1087,20 +1404,30 @@ def main(
             "month",
             "day_of_year_sin",
             "day_of_year_cos",
-
-        ] + [
-            column
-            for column
-            in OPTIONAL_FEATURE_COLUMNS
-            if column
-            in latest.columns
         ]
 
-        output_path = (
-            resolve_path(
-                config,
-                "predictions",
-            )
+        for column in OPTIONAL_FEATURE_COLUMNS:
+            if (
+                column in latest.columns
+                and column not in output_columns
+            ):
+                output_columns.append(
+                    column
+                )
+
+        output_columns = [
+            column
+            for column in output_columns
+            if column in latest.columns
+        ]
+
+        # -----------------------------------------
+        # 14. CSV 저장
+        # -----------------------------------------
+
+        output_path = resolve_path(
+            config,
+            "predictions",
         )
 
         output_path.parent.mkdir(
@@ -1116,24 +1443,63 @@ def main(
             float_format="%.8f",
         )
 
-        print()
+        # -----------------------------------------
+        # 15. 결과 출력
+        # -----------------------------------------
 
+        print()
+        print(
+            "=== 화면용 AI 위험점수 구성 ==="
+        )
+
+        print(
+            "기존 feature 종합지수 : 65%"
+        )
+        print(
+            "XGBoost 상대위험      : 20%"
+        )
+        print(
+            "도로 구조 위험        : 15%"
+        )
+
+        print()
+        print(
+            "도로 구조 내부 비율:"
+        )
+        print(
+            " - 도로등급: 80%"
+        )
+        print(
+            " - 차로수  : 20%"
+        )
+
+        print()
+        print(
+            "=== feature 그룹 가중치 ==="
+        )
+
+        for (
+            feature,
+            weight,
+        ) in sorted(
+            display_weights.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        ):
+            print(
+                f"{feature:<25}: "
+                f"{weight * 100:6.2f}%"
+            )
+
+        print()
         print(
             f"예측 저장 완료: "
             f"{output_path}"
         )
 
         print()
-
         print(
-            "=== AI 도로 위험점수 ==="
-        )
-
-        print(
-            "고유값 수:",
-            latest[
-                "road_risk_score"
-            ].nunique(),
+            "=== 당일 상대 AI 위험점수 ==="
         )
 
         print(
@@ -1143,9 +1509,19 @@ def main(
         )
 
         print()
+        print(
+            "=== 절대 위험점수 ==="
+        )
 
         print(
-            "=== 위험등급 분포 ==="
+            latest[
+                "absolute_risk_score"
+            ].describe()
+        )
+
+        print()
+        print(
+            "=== 상대 위험등급 ==="
         )
 
         print(
@@ -1155,41 +1531,85 @@ def main(
         )
 
         print()
-
         print(
-            "=== 도로구조 점수 ==="
+            "=== 절대 위험등급 ==="
         )
 
         print(
             latest[
-                "road_structure_score"
-            ].describe()
+                "absolute_risk_level"
+            ].value_counts()
         )
 
         print()
-
         print(
-            "=== 상위 20개 ==="
+            "=== 조치 단계 ==="
         )
 
         print(
             latest[
-                [
-                    "grid_id",
-                    "road_risk_score",
-                    "risk_score",
-                    "road_structure_score",
-                    "lanes",
-                    "road_rank",
-                    "lanes_lift",
-                    "road_rank_lift",
-                    "past_potholes_total",
-                    "days_since_last_repair",
-                    "precip_7d",
-                    "freeze_thaw_7d",
-                ]
+                "action_level"
+            ].value_counts()
+        )
+
+        print()
+        print(
+            "=== 예방보수 후보 ==="
+        )
+
+        print(
+            int(
+                latest[
+                    "preventive_repair_candidate"
+                ].sum()
+            )
+        )
+
+        print()
+        print(
+            "=== Trigger 현황 ==="
+        )
+
+        print(
+            latest[
+                "risk_trigger"
+            ].value_counts()
+        )
+
+        print()
+        print(
+            "=== 조치 우선순위 상위 30개 ==="
+        )
+
+        debug_columns = [
+            "action_rank",
+            "grid_id",
+            "action_level",
+            "absolute_risk_score",
+            "road_risk_score",
+            "relative_top_percent",
+            "risk_trigger",
+            "past_potholes_30d",
+            "past_potholes_90d",
+            "past_potholes_total",
+            "days_since_last_repair",
+            "freeze_thaw_7d",
+            "snowfall",
+            "precip_7d",
+            "road_structure_score",
+        ]
+
+        debug_columns = [
+            column
+            for column in debug_columns
+            if column in latest.columns
+        ]
+
+        print(
+            latest[
+                debug_columns
             ]
-            .head(20)
+            .head(30)
             .to_string(
                 index=False
             )
@@ -1204,10 +1624,7 @@ def main(
 
 
 if __name__ == "__main__":
-    parser = (
-        argparse
-        .ArgumentParser()
-    )
+    parser = argparse.ArgumentParser()
 
     parser.add_argument(
         "--config",
@@ -1220,9 +1637,7 @@ if __name__ == "__main__":
         help="YYYY-MM-DD",
     )
 
-    args = (
-        parser.parse_args()
-    )
+    args = parser.parse_args()
 
     main(
         args.config,
