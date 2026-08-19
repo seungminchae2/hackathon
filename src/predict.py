@@ -48,6 +48,7 @@ DISPLAY_OTHER_FEATURES = [
 def percentile_score(
     series: pd.Series,
 ) -> pd.Series:
+
     values = pd.to_numeric(
         series,
         errors="coerce",
@@ -60,7 +61,9 @@ def percentile_score(
             dtype=float,
         )
 
-    if values.nunique(dropna=True) <= 1:
+    if values.nunique(
+        dropna=True
+    ) <= 1:
         return pd.Series(
             0.0,
             index=series.index,
@@ -101,13 +104,14 @@ def percentile_score(
 def road_risk_level_from_score(
     score: float,
 ) -> str:
-    if score >= 60:
+
+    if score >= 85:
         return "매우 높음"
 
-    if score >= 30:
+    if score >= 70:
         return "높음"
 
-    if score >= 20:
+    if score >= 40:
         return "보통"
 
     return "낮음"
@@ -116,6 +120,7 @@ def road_risk_level_from_score(
 def absolute_risk_level_from_score(
     score: float,
 ) -> str:
+
     if score >= 80:
         return "매우 높음"
 
@@ -129,6 +134,7 @@ def absolute_risk_level_from_score(
 
 
 def load_road_attributes() -> pd.DataFrame:
+
     attr = pd.read_csv(
         "data/grid_road_attributes_500m.csv",
         dtype={
@@ -150,16 +156,21 @@ def lookup_category_lift(
     value,
     stats: dict,
 ) -> float:
+
     categories = stats.get(
         "categories",
         {},
     )
 
-    key = str(value)
+    key = str(
+        value
+    )
 
     if key in categories:
         return float(
-            categories[key].get(
+            categories[
+                key
+            ].get(
                 "lift",
                 1.0,
             )
@@ -171,6 +182,7 @@ def lookup_category_lift(
 def normalize_lift_series(
     series: pd.Series,
 ) -> pd.Series:
+
     values = pd.to_numeric(
         series,
         errors="coerce",
@@ -209,6 +221,7 @@ def calculate_road_structure_score(
     latest: pd.DataFrame,
     bundle: dict,
 ) -> pd.DataFrame:
+
     stats = bundle.get(
         "road_structure_statistics"
     )
@@ -224,12 +237,16 @@ def calculate_road_structure_score(
     latest = latest.copy()
 
     latest["grid_id"] = (
-        latest["grid_id"]
+        latest[
+            "grid_id"
+        ]
         .astype(str)
     )
 
     attributes["grid_id"] = (
-        attributes["grid_id"]
+        attributes[
+            "grid_id"
+        ]
         .astype(str)
     )
 
@@ -256,7 +273,9 @@ def calculate_road_structure_score(
         )
 
     latest = latest.merge(
-        attributes[columns_to_add],
+        attributes[
+            columns_to_add
+        ],
         on="grid_id",
         how="left",
     )
@@ -272,7 +291,9 @@ def calculate_road_structure_score(
     )
 
     latest["lanes_lift"] = (
-        latest["lanes"]
+        latest[
+            "lanes"
+        ]
         .apply(
             lambda value: lookup_category_lift(
                 value,
@@ -282,7 +303,9 @@ def calculate_road_structure_score(
     )
 
     latest["road_rank_lift"] = (
-        latest["road_rank"]
+        latest[
+            "road_rank"
+        ]
         .apply(
             lambda value: lookup_category_lift(
                 value,
@@ -291,19 +314,25 @@ def calculate_road_structure_score(
         )
     )
 
-    latest["lanes_structure_component"] = (
-        normalize_lift_series(
-            latest["lanes_lift"]
-        )
+    latest[
+        "lanes_structure_component"
+    ] = normalize_lift_series(
+        latest[
+            "lanes_lift"
+        ]
     )
 
-    latest["road_rank_structure_component"] = (
-        normalize_lift_series(
-            latest["road_rank_lift"]
-        )
+    latest[
+        "road_rank_structure_component"
+    ] = normalize_lift_series(
+        latest[
+            "road_rank_lift"
+        ]
     )
 
-    latest["road_structure_score"] = (
+    latest[
+        "road_structure_score"
+    ] = (
         0.20
         * latest[
             "lanes_structure_component"
@@ -314,9 +343,16 @@ def calculate_road_structure_score(
         ]
     )
 
-    latest["road_structure_score"] = (
-        latest["road_structure_score"]
-        .clip(0.0, 1.0)
+    latest[
+        "road_structure_score"
+    ] = (
+        latest[
+            "road_structure_score"
+        ]
+        .clip(
+            0.0,
+            1.0,
+        )
     )
 
     return latest
@@ -325,14 +361,18 @@ def calculate_road_structure_score(
 def build_pothole_history_component(
     latest: pd.DataFrame,
 ) -> pd.Series:
+
     components = []
 
     for feature in DISPLAY_POTHOLE_FEATURES:
+
         if feature not in latest.columns:
             continue
 
         component = percentile_score(
-            latest[feature]
+            latest[
+                feature
+            ]
         )
 
         components.append(
@@ -360,15 +400,22 @@ def build_feature_display_score(
     latest: pd.DataFrame,
     model,
     feature_columns: list[str],
-) -> tuple[pd.Series, dict[str, float]]:
+) -> tuple[
+    pd.Series,
+    dict[str, float],
+]:
+
     importances = np.asarray(
         model.feature_importances_,
         dtype=float,
     )
 
     importance_map = {
-        feature: float(importance)
-        for feature, importance in zip(
+        feature: float(
+            importance
+        )
+        for feature, importance
+        in zip(
             feature_columns,
             importances,
         )
@@ -379,20 +426,24 @@ def build_feature_display_score(
             feature,
             0.0,
         )
-        for feature in DISPLAY_POTHOLE_FEATURES
+        for feature
+        in DISPLAY_POTHOLE_FEATURES
     )
 
     group_importances = {
-        "pothole_history": pothole_importance,
+        "pothole_history":
+            pothole_importance,
     }
 
     for feature in DISPLAY_OTHER_FEATURES:
+
         if feature in latest.columns:
-            group_importances[feature] = (
-                importance_map.get(
-                    feature,
-                    0.0,
-                )
+
+            group_importances[
+                feature
+            ] = importance_map.get(
+                feature,
+                0.0,
             )
 
     positive_total = sum(
@@ -400,18 +451,31 @@ def build_feature_display_score(
             value,
             0.0,
         )
-        for value in group_importances.values()
+        for value
+        in group_importances.values()
     )
 
     if positive_total <= 0:
+
         weights = {
-            key: 1.0 / len(group_importances)
-            for key in group_importances
+            key:
+                1.0
+                / len(
+                    group_importances
+                )
+            for key
+            in group_importances
         }
+
     else:
+
         weights = {
-            key: max(value, 0.0)
-            / positive_total
+            key:
+                max(
+                    value,
+                    0.0,
+                )
+                / positive_total
             for key, value
             in group_importances.items()
         }
@@ -437,11 +501,14 @@ def build_feature_display_score(
     )
 
     for feature in DISPLAY_OTHER_FEATURES:
+
         if feature not in latest.columns:
             continue
 
         component = percentile_score(
-            latest[feature]
+            latest[
+                feature
+            ]
         )
 
         feature_score += (
@@ -464,6 +531,7 @@ def build_feature_display_score(
 def calculate_relative_model_score(
     risk_score: pd.Series,
 ) -> pd.Series:
+
     return percentile_score(
         risk_score
     )
@@ -472,6 +540,7 @@ def calculate_relative_model_score(
 def calculate_absolute_feature_component(
     latest: pd.DataFrame,
 ) -> pd.Series:
+
     pothole_30 = pd.to_numeric(
         latest.get(
             "past_potholes_30d",
@@ -575,11 +644,16 @@ def calculate_absolute_feature_component(
     )
 
     result = (
-        0.35 * pothole_component
-        + 0.20 * repair_component
-        + 0.25 * freeze_component
-        + 0.15 * precip_component
-        + 0.05 * snow_component
+        0.35
+        * pothole_component
+        + 0.20
+        * repair_component
+        + 0.25
+        * freeze_component
+        + 0.15
+        * precip_component
+        + 0.05
+        * snow_component
     )
 
     return pd.Series(
@@ -595,6 +669,7 @@ def calculate_absolute_feature_component(
 def build_risk_trigger(
     row: pd.Series,
 ) -> str:
+
     triggers = []
 
     recent30 = float(
@@ -641,6 +716,7 @@ def build_risk_trigger(
         recent30 >= 1
         and freeze >= 3
     ):
+
         triggers.append(
             "최근30일 포트홀+동결융해 3회 이상"
         )
@@ -649,6 +725,7 @@ def build_risk_trigger(
         recent90 >= 1
         and freeze >= 3
     ):
+
         triggers.append(
             "최근90일 포트홀+동결융해 3회 이상"
         )
@@ -657,6 +734,7 @@ def build_risk_trigger(
         total >= 1
         and freeze >= 3
     ):
+
         triggers.append(
             "과거 포트홀 이력+동결융해 3회 이상"
         )
@@ -665,6 +743,7 @@ def build_risk_trigger(
         total >= 1
         and repair_days >= 365
     ):
+
         triggers.append(
             "보수 후 365일 이상"
         )
@@ -680,7 +759,10 @@ def build_risk_trigger(
 def is_strong_trigger(
     trigger: str,
 ) -> bool:
-    trigger = str(trigger)
+
+    trigger = str(
+        trigger
+    )
 
     return (
         "최근30일 포트홀+동결융해 3회 이상"
@@ -694,6 +776,7 @@ def is_strong_trigger(
 def determine_action_level(
     row: pd.Series,
 ) -> str:
+
     absolute_score = float(
         row.get(
             "absolute_risk_score",
@@ -725,18 +808,36 @@ def determine_action_level(
         )
     )
 
+    # ======================================================
+    # 예방보수
+    #
+    # 1. 절대 위험도 60점 이상
+    # 2. 당일 상대 위험도 상위 0.5%
+    # 3. 최근 30/90일 포트홀 + 동결융해 강한 Trigger
+    #
+    # 세 조건을 모두 만족해야 예방보수
+    # ======================================================
+
     if (
-        absolute_score >= 80
+        absolute_score >= 60
+        and relative_top <= 0.5
         and strong_trigger
-        and relative_top <= 5
     ):
         return "예방보수"
+
+    # ======================================================
+    # 긴급점검
+    # ======================================================
 
     if (
         absolute_score >= 60
         or strong_trigger
     ):
         return "긴급점검"
+
+    # ======================================================
+    # 우선점검
+    # ======================================================
 
     if (
         absolute_score >= 40
@@ -745,13 +846,228 @@ def determine_action_level(
     ):
         return "우선점검"
 
+    # ======================================================
+    # 일반 모니터링
+    # ======================================================
+
     return "모니터링"
+
+
+def prepare_weather_for_date(
+    history: pd.DataFrame,
+    forecast: pd.DataFrame,
+    prediction_date: str | None,
+) -> tuple[
+    pd.DataFrame,
+    pd.Timestamp,
+    str,
+]:
+
+    history = history.copy()
+    forecast = forecast.copy()
+
+    history["date"] = pd.to_datetime(
+        history["date"],
+        errors="coerce",
+    )
+
+    forecast["date"] = pd.to_datetime(
+        forecast["date"],
+        errors="coerce",
+    )
+
+    history = history.dropna(
+        subset=[
+            "date"
+        ]
+    )
+
+    forecast = forecast.dropna(
+        subset=[
+            "date"
+        ]
+    )
+
+    if history.empty:
+        raise ValueError(
+            "weather_history.csv에 "
+            "유효한 기상 데이터가 없습니다."
+        )
+
+    history_dates = set(
+        history[
+            "date"
+        ]
+        .dt.normalize()
+    )
+
+    forecast_dates = set(
+        forecast[
+            "date"
+        ]
+        .dt.normalize()
+    )
+
+    if prediction_date:
+
+        target_date = pd.Timestamp(
+            prediction_date
+        ).normalize()
+
+    else:
+
+        today = (
+            pd.Timestamp
+            .today()
+            .normalize()
+        )
+
+        if today in forecast_dates:
+
+            target_date = today
+
+        elif forecast_dates:
+
+            target_date = max(
+                forecast_dates
+            )
+
+        else:
+
+            target_date = max(
+                history_dates
+            )
+
+    if target_date in history_dates:
+
+        weather_source = (
+            history.loc[
+                history[
+                    "date"
+                ]
+                <= target_date
+            ]
+            .copy()
+        )
+
+        source_name = (
+            "과거 관측 기상"
+        )
+
+    elif target_date in forecast_dates:
+
+        combined = pd.concat(
+            [
+                history,
+                forecast,
+            ],
+            ignore_index=True,
+        )
+
+        combined = (
+            combined
+            .sort_values(
+                [
+                    "station_id",
+                    "date",
+                ]
+            )
+            .drop_duplicates(
+                [
+                    "station_id",
+                    "date",
+                ],
+                keep="last",
+            )
+        )
+
+        weather_source = (
+            combined.loc[
+                combined[
+                    "date"
+                ]
+                <= target_date
+            ]
+            .copy()
+        )
+
+        source_name = (
+            "기상청 단기예보"
+        )
+
+    else:
+
+        history_min = (
+            history[
+                "date"
+            ]
+            .min()
+            .date()
+        )
+
+        history_max = (
+            history[
+                "date"
+            ]
+            .max()
+            .date()
+        )
+
+        if forecast.empty:
+
+            forecast_text = (
+                "예보 데이터 없음"
+            )
+
+        else:
+
+            forecast_text = (
+                f"{forecast['date'].min().date()}"
+                f" ~ "
+                f"{forecast['date'].max().date()}"
+            )
+
+        raise ValueError(
+            f"요청한 날짜 {target_date.date()}의 "
+            f"기상 데이터가 없습니다.\n"
+            f"weather_history 범위: "
+            f"{history_min} ~ {history_max}\n"
+            f"weather_forecast 범위: "
+            f"{forecast_text}"
+        )
+
+    weather_source = (
+        weather_source
+        .sort_values(
+            [
+                "station_id",
+                "date",
+            ]
+        )
+        .drop_duplicates(
+            [
+                "station_id",
+                "date",
+            ],
+            keep="last",
+        )
+        .reset_index(
+            drop=True
+        )
+    )
+
+    return (
+        weather_source,
+        target_date,
+        source_name,
+    )
 
 
 def main(
     config_path: str,
     prediction_date: str | None = None,
 ) -> None:
+
     config = load_config(
         config_path
     )
@@ -762,6 +1078,7 @@ def main(
     )
 
     if not model_path.exists():
+
         raise FileNotFoundError(
             "학습 모델이 없습니다. "
             "먼저 python -m src.train을 실행하십시오."
@@ -777,6 +1094,7 @@ def main(
         )
         != MODEL_SCHEMA_VERSION
     ):
+
         raise ValueError(
             "기존 모델 형식입니다. "
             "python -m src.train을 다시 실행하십시오."
@@ -789,87 +1107,69 @@ def main(
         )
     )
 
-    forecast = pd.read_csv(
-        resolve_path(
-            config,
-            "weather_forecast",
-        )
+    forecast_path = resolve_path(
+        config,
+        "weather_forecast",
     )
 
-    combined = pd.concat(
-        [
-            history,
-            forecast,
-        ],
-        ignore_index=True,
+    if forecast_path.exists():
+
+        forecast = pd.read_csv(
+            forecast_path
+        )
+
+    else:
+
+        forecast = pd.DataFrame(
+            columns=history.columns
+        )
+
+    (
+        weather_source,
+        target_date,
+        weather_source_name,
+    ) = prepare_weather_for_date(
+        history=history,
+        forecast=forecast,
+        prediction_date=prediction_date,
     )
 
-    combined["date"] = pd.to_datetime(
-        combined["date"],
-        errors="coerce",
+    print()
+    print(
+        "=" * 70
     )
 
-    combined = (
-        combined
-        .dropna(
-            subset=["date"]
-        )
-        .sort_values(
-            [
-                "station_id",
-                "date",
-            ]
-        )
-        .drop_duplicates(
-            [
-                "station_id",
-                "date",
-            ],
-            keep="last",
-        )
+    print(
+        f"예측 대상 날짜: "
+        f"{target_date.date()}"
+    )
+
+    print(
+        f"기상 데이터: "
+        f"{weather_source_name}"
+    )
+
+    print(
+        "=" * 70
     )
 
     temp_path: Path | None = None
 
     try:
+
         with tempfile.NamedTemporaryFile(
             suffix=".csv",
             delete=False,
         ) as temp_file:
+
             temp_path = Path(
                 temp_file.name
             )
 
-        combined.to_csv(
+        weather_source.to_csv(
             temp_path,
             index=False,
         )
-
-        available_dates = pd.to_datetime(
-            forecast["date"],
-            errors="coerce",
-        ).dropna()
-
-        if available_dates.empty:
-            raise ValueError(
-                "weather_forecast.csv에 유효한 예보 날짜가 없습니다."
-            )
-
-        target_date = (
-            pd.Timestamp(
-                prediction_date
-            ).normalize()
-            if prediction_date
-            else available_dates.max().normalize()
-        )
-
-        if target_date not in set(
-            available_dates.dt.normalize()
-        ):
-            raise ValueError(
-                f"예측 요청 날짜 {target_date.date()}가 "
-                "weather_forecast.csv에 없습니다."
-            )
 
         prepared = prepare_dataset(
             pothole_path=resolve_path(
@@ -902,37 +1202,50 @@ def main(
             ),
         )
 
-        latest = prepared.panel.loc[
-            prepared.panel[
-                "date"
-            ].eq(
-                target_date
-            )
-        ].copy()
+        latest = (
+            prepared.panel.loc[
+                prepared.panel[
+                    "date"
+                ].eq(
+                    target_date
+                )
+            ]
+            .copy()
+        )
 
         if latest.empty:
+
             raise ValueError(
-                "예측 대상 날짜 데이터가 없습니다: "
+                "예측 대상 날짜의 "
+                "grid-day 데이터가 생성되지 않았습니다: "
                 f"{target_date.date()}"
             )
 
-        feature_columns = bundle[
-            "features"
-        ]
-
-        matrix, _ = prepare_feature_matrix(
-            latest,
-            feature_columns,
+        feature_columns = (
             bundle[
-                "feature_medians"
-            ],
+                "features"
+            ]
         )
 
-        model = bundle[
-            "model"
-        ]
+        matrix, _ = (
+            prepare_feature_matrix(
+                latest,
+                feature_columns,
+                bundle[
+                    "feature_medians"
+                ],
+            )
+        )
 
-        latest["risk_score"] = (
+        model = (
+            bundle[
+                "model"
+            ]
+        )
+
+        latest[
+            "risk_score"
+        ] = (
             model.predict_proba(
                 matrix
             )[:, 1]
@@ -1168,8 +1481,13 @@ def main(
         )
 
         for column in priority.columns:
-            latest[column] = (
-                priority[column]
+
+            latest[
+                column
+            ] = (
+                priority[
+                    column
+                ]
             )
 
         latest[
@@ -1178,6 +1496,12 @@ def main(
             target_date
             .date()
             .isoformat()
+        )
+
+        latest[
+            "weather_source"
+        ] = (
+            weather_source_name
         )
 
         action_priority = {
@@ -1226,7 +1550,8 @@ def main(
         latest[
             "action_rank"
         ] = (
-            latest.index + 1
+            latest.index
+            + 1
         )
 
         latest = latest.drop(
@@ -1254,6 +1579,8 @@ def main(
 
         output_columns = [
             "prediction_date",
+            "weather_source",
+
             "grid_id",
             "grid_lat",
             "grid_lon",
@@ -1294,6 +1621,7 @@ def main(
             "priority_rank",
             "recurrence_score",
             "importance_score",
+
             "priority_weight_risk",
             "priority_weight_recurrence",
             "priority_weight_importance",
@@ -1326,26 +1654,23 @@ def main(
         ]
 
         for column in OPTIONAL_FEATURE_COLUMNS:
+
             if (
                 column in latest.columns
-                and column not in output_columns
+                and column
+                not in output_columns
             ):
+
                 output_columns.append(
                     column
                 )
 
         output_columns = [
             column
-            for column in output_columns
+            for column
+            in output_columns
             if column in latest.columns
         ]
-
-        # ==================================================
-        # CSV 저장
-        #
-        # 1. 기존 predictions_v2.csv 유지
-        # 2. 날짜별 predictions_YYYY-MM-DD.csv 추가 저장
-        # ==================================================
 
         output_path = resolve_path(
             config,
@@ -1357,18 +1682,19 @@ def main(
             exist_ok=True,
         )
 
-        output_df = latest[
-            output_columns
-        ].copy()
+        output_df = (
+            latest[
+                output_columns
+            ]
+            .copy()
+        )
 
-        # 기존 Streamlit 호환용
         output_df.to_csv(
             output_path,
             index=False,
             float_format="%.8f",
         )
 
-        # 날짜별 예측 파일
         date_string = (
             target_date
             .date()
@@ -1394,9 +1720,11 @@ def main(
         print(
             "기존 feature 종합지수 : 65%"
         )
+
         print(
             "XGBoost 상대위험      : 20%"
         )
+
         print(
             "도로 구조 위험        : 15%"
         )
@@ -1405,11 +1733,30 @@ def main(
         print(
             "도로 구조 내부 비율:"
         )
+
         print(
             " - 도로등급: 80%"
         )
+
         print(
             " - 차로수  : 20%"
+        )
+
+        print()
+        print(
+            "=== 예방보수 기준 ==="
+        )
+
+        print(
+            "절대 위험도 60점 이상"
+        )
+
+        print(
+            "당일 상대 위험도 상위 0.5%"
+        )
+
+        print(
+            "강한 Trigger 존재"
         )
 
         print()
@@ -1422,15 +1769,22 @@ def main(
             weight,
         ) in sorted(
             display_weights.items(),
-            key=lambda item: item[1],
+            key=lambda item:
+                item[1],
             reverse=True,
         ):
+
             print(
                 f"{feature:<25}: "
                 f"{weight * 100:6.2f}%"
             )
 
         print()
+        print(
+            f"기상 데이터 출처: "
+            f"{weather_source_name}"
+        )
+
         print(
             f"기본 예측 저장 완료: "
             f"{output_path}"
@@ -1449,7 +1803,8 @@ def main(
         print(
             latest[
                 "road_risk_score"
-            ].describe()
+            ]
+            .describe()
         )
 
         print()
@@ -1460,7 +1815,8 @@ def main(
         print(
             latest[
                 "absolute_risk_score"
-            ].describe()
+            ]
+            .describe()
         )
 
         print()
@@ -1471,7 +1827,8 @@ def main(
         print(
             latest[
                 "risk_level"
-            ].value_counts()
+            ]
+            .value_counts()
         )
 
         print()
@@ -1482,7 +1839,8 @@ def main(
         print(
             latest[
                 "absolute_risk_level"
-            ].value_counts()
+            ]
+            .value_counts()
         )
 
         print()
@@ -1493,7 +1851,8 @@ def main(
         print(
             latest[
                 "action_level"
-            ].value_counts()
+            ]
+            .value_counts()
         )
 
         print()
@@ -1505,7 +1864,8 @@ def main(
             int(
                 latest[
                     "preventive_repair_candidate"
-                ].sum()
+                ]
+                .sum()
             )
         )
 
@@ -1517,18 +1877,18 @@ def main(
         print(
             latest[
                 "risk_trigger"
-            ].value_counts()
+            ]
+            .value_counts()
         )
 
         print()
         print(
-            "=== 조치 우선순위 상위 30개 ==="
+            "=== 예방보수 후보 상세 ==="
         )
 
-        debug_columns = [
+        preventive_columns = [
             "action_rank",
             "grid_id",
-            "action_level",
             "absolute_risk_score",
             "road_risk_score",
             "relative_top_percent",
@@ -1543,9 +1903,70 @@ def main(
             "road_structure_score",
         ]
 
+        preventive_columns = [
+            column
+            for column in preventive_columns
+            if column in latest.columns
+        ]
+
+        preventive_rows = (
+            latest.loc[
+                latest[
+                    "preventive_repair_candidate"
+                ].eq(1),
+                preventive_columns,
+            ]
+        )
+
+        if preventive_rows.empty:
+
+            print(
+                "예방보수 후보 없음"
+            )
+
+        else:
+
+            print(
+                preventive_rows
+                .to_string(
+                    index=False
+                )
+            )
+
+        print()
+        print(
+            "=== 조치 우선순위 상위 30개 ==="
+        )
+
+        debug_columns = [
+            "action_rank",
+            "grid_id",
+            "action_level",
+
+            "absolute_risk_score",
+            "road_risk_score",
+
+            "relative_top_percent",
+
+            "risk_trigger",
+
+            "past_potholes_30d",
+            "past_potholes_90d",
+            "past_potholes_total",
+
+            "days_since_last_repair",
+
+            "freeze_thaw_7d",
+            "snowfall",
+            "precip_7d",
+
+            "road_structure_score",
+        ]
+
         debug_columns = [
             column
-            for column in debug_columns
+            for column
+            in debug_columns
             if column in latest.columns
         ]
 
@@ -1553,21 +1974,26 @@ def main(
             latest[
                 debug_columns
             ]
-            .head(30)
+            .head(
+                30
+            )
             .to_string(
                 index=False
             )
         )
 
     finally:
+
         if (
             temp_path
             and temp_path.exists()
         ):
+
             temp_path.unlink()
 
 
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -1578,7 +2004,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--date",
         default=None,
-        help="YYYY-MM-DD",
+        help=(
+            "예측 날짜 YYYY-MM-DD. "
+            "과거 날짜는 weather_history, "
+            "현재/미래는 weather_forecast를 사용합니다."
+        ),
     )
 
     args = parser.parse_args()
