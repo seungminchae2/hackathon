@@ -52,11 +52,13 @@ def show_kakao_map(
     app_key: str,
     height: int = 730,
     route_plan: dict[str, Any] | None = None,
+    selected_route_id: str | None = None,
 ) -> None:
     _KAKAO_MAP_COMPONENT(
         rows=_records_for_map(predictions),
         appKey=app_key.strip(),
         componentHeight=height,
         routePlan=route_plan,
+        selectedRouteId=selected_route_id,
         default=None,
     )

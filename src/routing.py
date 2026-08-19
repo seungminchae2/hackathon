@@ -17,6 +17,8 @@ LOCAL_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
 COORD2ADDRESS_URL = "https://dapi.kakao.com/v2/local/geo/coord2address.json"
 DIRECTIONS_URL = "https://apis-navi.kakaomobility.com/v1/directions"
 HIGH_RISK_LEVELS = {"매우 높음", "높음"}
+MAX_ROUTES = 3
+LOW_RISK_TARGET_COUNT = 5
 
 
 class KakaoApiError(RuntimeError):
@@ -169,6 +171,16 @@ def _extract_route(route: dict[str, Any], route_index: int) -> dict[str, Any]:
     }
 
 
+def _route_signature(route: dict[str, Any]) -> tuple[int, int, int, int]:
+    middle = route["path"][len(route["path"]) // 2]
+    return (
+        round(route["distance_m"] / 100),
+        round(route["duration_s"] / 30),
+        round(middle[0] * 1000),
+        round(middle[1] * 1000),
+    )
+
+
 def fetch_directions(
     origin: dict[str, Any],
     destination: dict[str, Any],
@@ -195,13 +207,7 @@ def fetch_directions(
             if int(raw_route.get("result_code", 0)) != 0:
                 continue
             route = _extract_route(raw_route, len(collected))
-            middle = route["path"][len(route["path"]) // 2]
-            signature = (
-                round(route["distance_m"] / 100),
-                round(route["duration_s"] / 30),
-                round(middle[0] * 1000),
-                round(middle[1] * 1000),
-            )
+            signature = _route_signature(route)
             if signature not in signatures:
                 signatures.add(signature)
                 collected.append(route)
@@ -211,6 +217,62 @@ def fetch_directions(
     if not collected:
         raise KakaoApiError("출발지와 도착지 사이의 자동차 경로를 찾지 못했습니다.")
     return collected[:3]
+
+
+def _offset_waypoint(
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    offset_km: float,
+    side: float,
+) -> dict[str, float]:
+    """출발-도착 중점에서 진행 방향에 수직으로 offset_km만큼 떨어진 우회 경유지를 만듭니다."""
+    lon1, lat1 = float(origin["lon"]), float(origin["lat"])
+    lon2, lat2 = float(destination["lon"]), float(destination["lat"])
+    mid_lat = (lat1 + lat2) / 2
+    mid_lon = (lon1 + lon2) / 2
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    length = math.hypot(dlat, dlon) or 1e-9
+    perp_lat = -dlon / length
+    perp_lon = dlat / length
+    lat_step = offset_km / 111.0
+    lon_step = offset_km / (111.0 * max(math.cos(math.radians(mid_lat)), 1e-6))
+    return {
+        "lat": mid_lat + perp_lat * lat_step * side,
+        "lon": mid_lon + perp_lon * lon_step * side,
+    }
+
+
+def fetch_detour_route(
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    waypoint: dict[str, float],
+    rest_api_key: str,
+    route_index: int,
+) -> dict[str, Any] | None:
+    """지정한 경유지를 지나는 우회 경로 하나를 요청합니다. 실패하면 None을 반환합니다."""
+    try:
+        payload = _get_json(
+            DIRECTIONS_URL,
+            rest_api_key,
+            {
+                "origin": f"{origin['lon']},{origin['lat']},name={origin['name']}",
+                "destination": f"{destination['lon']},{destination['lat']},name={destination['name']}",
+                "waypoints": f"{waypoint['lon']},{waypoint['lat']}",
+                "priority": "RECOMMEND",
+                "alternatives": "false",
+                "road_details": "true",
+                "summary": "false",
+                "roadevent": 0,
+            },
+        )
+    except KakaoApiError:
+        return None
+    for raw_route in payload.get("routes") or []:
+        if int(raw_route.get("result_code", 0)) != 0:
+            continue
+        return _extract_route(raw_route, route_index)
+    return None
 
 
 def _haversine_km(point_a: list[float], point_b: list[float]) -> float:
@@ -337,6 +399,49 @@ def choose_safe_route(routes: list[dict[str, Any]]) -> tuple[int, str]:
     return safest_index, f"기본 경로보다 위험 노출을 {reduction:.0%} 줄이는 우회 경로입니다. 예상 시간은 {extra_minutes}분 늘어납니다."
 
 
+def _ensure_low_risk_route(
+    origin: dict[str, Any],
+    destination: dict[str, Any],
+    rest_api_key: str,
+    predictions: pd.DataFrame,
+    analyzed: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """위험 격자를 LOW_RISK_TARGET_COUNT개 이하로 지나는 경로가 없으면, 우회 경유지를 넣어 하나 더 찾아봅니다."""
+    if len(analyzed) >= MAX_ROUTES and min(route["high_risk_count"] for route in analyzed) <= LOW_RISK_TARGET_COUNT:
+        return analyzed
+
+    signatures = {_route_signature(route) for route in analyzed}
+    best_candidate: dict[str, Any] | None = None
+    for offset_km, side in [(1.2, 1), (1.2, -1), (2.4, 1), (2.4, -1)]:
+        if len(analyzed) >= MAX_ROUTES and best_candidate and best_candidate["high_risk_count"] <= LOW_RISK_TARGET_COUNT:
+            break
+        waypoint = _offset_waypoint(origin, destination, offset_km, side)
+        raw_detour = fetch_detour_route(origin, destination, waypoint, rest_api_key, len(analyzed))
+        if raw_detour is None:
+            continue
+        signature = _route_signature(raw_detour)
+        if signature in signatures:
+            continue
+        signatures.add(signature)
+        candidate = analyze_route_risk(raw_detour, predictions)
+        if best_candidate is None or candidate["high_risk_count"] < best_candidate["high_risk_count"]:
+            best_candidate = candidate
+        if candidate["high_risk_count"] <= LOW_RISK_TARGET_COUNT:
+            best_candidate = candidate
+            break
+
+    if best_candidate is None:
+        return analyzed
+
+    best_candidate["label"] = "위험 회피 경로"
+    if len(analyzed) < MAX_ROUTES:
+        analyzed.append(best_candidate)
+    elif best_candidate["high_risk_count"] < max(route["high_risk_count"] for route in analyzed):
+        worst_index = max(range(len(analyzed)), key=lambda i: analyzed[i]["high_risk_count"])
+        analyzed[worst_index] = best_candidate
+    return analyzed
+
+
 def build_safe_route_plan(
     origin_query: str,
     destination_query: str,
@@ -347,6 +452,7 @@ def build_safe_route_plan(
     destination = resolve_place(destination_query, rest_api_key)
     raw_routes = fetch_directions(origin, destination, rest_api_key)
     analyzed = [analyze_route_risk(route, predictions) for route in raw_routes]
+    analyzed = _ensure_low_risk_route(origin, destination, rest_api_key, predictions, analyzed)
     recommended_index, message = choose_safe_route(analyzed)
 
     client_routes: list[dict[str, Any]] = []
@@ -362,7 +468,6 @@ def build_safe_route_plan(
                 "path": path,
                 "selected": selected,
                 "label": "안전 우회 추천" if selected and index != 0 else route["label"],
-                "color": "#13795b" if selected else ("#e76f51" if index == 0 else "#64748b"),
             }
         )
 
