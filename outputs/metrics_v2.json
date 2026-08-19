@@ -1,44 +1,53 @@
 {
   "schema_version": "2.0",
-  "trained_at_utc": "2026-08-18T10:39:10.997275+00:00",
+  "trained_at_utc": "2026-08-19T08:31:15.058908+00:00",
   "target": "기준일 다음 30일 내 포트홀 발생 여부",
   "features": [
-    "grid_lat",
-    "grid_lon",
+    "avg_temp",
+    "min_temp",
+    "max_temp",
+    "temp_range",
+    "precipitation",
     "precip_3d",
     "precip_7d",
+    "snowfall",
+    "humidity",
+    "freeze_thaw",
     "freeze_thaw_7d",
+    "past_potholes_30d",
     "past_potholes_90d",
     "past_potholes_total",
-    "has_repair_history",
-    "days_since_last_repair"
+    "days_since_last_repair",
+    "month",
+    "day_of_year_sin",
+    "day_of_year_cos"
   ],
   "split": {
-    "validation_start": "2025-03-31",
-    "test_start": "2025-07-14",
-    "train_rows": 3361085,
-    "validation_rows": 775635,
-    "test_rows": 1041567
+    "validation_start": "2025-11-15",
+    "test_start": "2026-02-28",
+    "train_rows": 6235998,
+    "validation_rows": 1445430,
+    "test_rows": 1927240
   },
   "class_imbalance": {
-    "train_positive": 463,
-    "train_negative": 3360622,
-    "scale_pos_weight": 7258.362850971922
+    "train_positive": 1738,
+    "train_negative": 6234260,
+    "scale_pos_weight": 3587.0310701956273
   },
   "metrics": {
     "validation": {
-      "roc_auc": 0.9901301134813039,
-      "pr_auc": 0.002108089656689065,
-      "f1": 0.00718132854578097,
-      "threshold": 0.001222682185471058,
-      "positive_rate": 3.867798642402677e-05
+      "roc_auc": 0.7379049641044811,
+      "pr_auc": 0.04986043278251685,
+      "f1": 0.1614075905191217,
+      "threshold": 0.5245950818061829,
+      "positive_rate": 0.0007444151567353659
     },
     "test": {
-      "roc_auc": 0.8463226272264883,
-      "pr_auc": 0.00010899542204612203,
-      "f1": 0.0,
-      "threshold": 0.001222682185471058,
-      "positive_rate": 2.9762847709268823e-05
+      "roc_auc": 0.6888495692346894,
+      "pr_auc": 0.011064069676422318,
+      "f1": 0.050206440957886046,
+      "threshold": 0.5245950818061829,
+      "positive_rate": 0.00019769203627986135
     }
   },
   "notes": [

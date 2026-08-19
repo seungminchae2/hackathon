@@ -14,9 +14,6 @@
     .map-empty { position:absolute; inset:0; display:none; place-items:center; padding:32px; text-align:center; background:linear-gradient(135deg,#e8f2ec,#f8f3e9); z-index:3; }
     .map-empty strong { display:block; font-size:21px; margin-bottom:8px; }
     .map-empty code { display:inline-block; margin-top:10px; padding:7px 10px; border-radius:8px; background:#fff; border:1px solid var(--line); }
-    .route-badge { position:absolute; display:none; left:16px; top:16px; z-index:4; max-width:360px; padding:12px 14px; border-radius:13px; background:rgba(255,255,255,.96); box-shadow:0 5px 20px rgba(16,35,28,.15); }
-    .route-badge b { display:block; color:var(--green); font-size:13px; margin-bottom:4px; }
-    .route-badge span { display:block; color:var(--muted); font-size:11px; line-height:1.4; }
     .legend { position:absolute; left:16px; bottom:16px; z-index:2; display:flex; gap:9px; align-items:center; padding:9px 12px; border-radius:999px; background:rgba(255,255,255,.94); box-shadow:0 4px 18px rgba(16,35,28,.12); font-size:12px; }
     .dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:4px; }
     .side { min-width:0; min-height:0; overflow:hidden; display:flex; flex-direction:column; border-left:1px solid var(--line); background:#fbfcfa; }
@@ -50,12 +47,6 @@
     .detail-authority .label { font-size:11px; font-weight:700; color:#27500a; margin-bottom:4px; }
     .detail-authority .dept, .detail-authority .phone { font-size:13px; color:#173404; }
     .detail-authority .phone { margin-top:2px; }
-    .marker { transform:translate(-50%,-50%); border:2px solid #fff; border-radius:50%; box-shadow:0 3px 10px rgba(0,0,0,.24); cursor:pointer; transition:transform .16s; }
-    .marker:hover, .marker.selected { transform:translate(-50%,-50%) scale(1.32); z-index:5; }
-    .danger-ring { width:18px; height:18px; border:3px solid #d93b36; border-radius:50%; box-shadow:0 0 0 3px rgba(217,59,54,.18); pointer-events:none; transition:opacity .15s, transform .15s; }
-    .danger-ring.ring-hidden { opacity:0; transform:scale(.4); }
-    .route-pin { display:grid; place-items:center; width:30px; height:30px; transform:translate(-50%,-100%); border:3px solid #fff; border-radius:50% 50% 50% 4px; rotate:-45deg; color:#fff; font-size:11px; font-weight:850; box-shadow:0 3px 12px rgba(0,0,0,.28); }
-    .route-pin span { rotate:45deg; }
     .empty-list { padding:30px 14px; text-align:center; color:var(--muted); }
     @media(max-width:760px) { .shell { grid-template-columns:1fr; grid-template-rows:390px 420px; height:810px; } .side { border-left:0; border-top:1px solid var(--line); } }
   </style>
@@ -65,7 +56,6 @@
     <section class="map-wrap">
       <div id="map"></div>
       <div id="mapEmpty" class="map-empty"><div><strong>카카오 지도 키가 필요합니더</strong><span>.env에 JavaScript 키를 넣고 화면을 새로고침하십시오.</span><br><code>KAKAO_MAP_APP_KEY=발급받은_JavaScript_키</code></div></div>
-      <div id="routeBadge" class="route-badge"></div>
       <div class="legend"><span><i class="dot" style="background:#d93b36"></i>매우 높음</span><span><i class="dot" style="background:#ed7a2c"></i>높음</span><span><i class="dot" style="background:#e7b642"></i>보통</span><span><i class="dot" style="background:#3d8b68"></i>낮음</span></div>
     </section>
     <aside class="side">
@@ -85,8 +75,6 @@
   <script>
     let rows = [];
     let kakaoKey = "";
-    let routePlan = null;
-    let selectedRouteId = null;
     let map = null;
     let selectedId = null;
     let initialized = false;
@@ -94,9 +82,6 @@
     const markerImageCache = new Map();
     let clusterer = null;
     let selectedMarker = null;
-    const routeObjects = [];
-    let dangerRingEls = [];
-    const DANGER_RING_MAX_LEVEL = 8; // 이 레벨보다 넓게(시·군 단위로) 보일 때는 위험 링을 숨깁니다.
     const colors = {"매우 높음":"#d93b36","높음":"#ed7a2c","보통":"#e7b642","낮음":"#3d8b68"};
 
     const pct = v => Number.isFinite(Number(v)) ? `${(Number(v)*100).toFixed(1)}%` : "-";
@@ -177,99 +162,6 @@
       empty.querySelector("span").textContent = message;
     }
 
-    function clearRoutes() {
-      while (routeObjects.length) {
-        const item = routeObjects.pop();
-        if (item && typeof item.setMap === "function") item.setMap(null);
-      }
-      dangerRingEls = [];
-      document.getElementById("routeBadge").style.display = "none";
-    }
-
-    function updateDangerRingVisibility() {
-      if (!map) return;
-      const hide = map.getLevel() > DANGER_RING_MAX_LEVEL;
-      dangerRingEls.forEach(el => el.classList.toggle("ring-hidden", hide));
-    }
-
-    function routePin(label, color, point) {
-      const element = document.createElement("div");
-      element.className = "route-pin";
-      element.style.background = color;
-      element.innerHTML = `<span>${esc(label)}</span>`;
-      const overlay = new kakao.maps.CustomOverlay({
-        position:new kakao.maps.LatLng(Number(point.lat), Number(point.lon)),
-        content:element,
-        yAnchor:0,
-        zIndex:8,
-      });
-      overlay.setMap(map);
-      routeObjects.push(overlay);
-    }
-
-    function renderRoutePlan() {
-      if (!map || !window.kakao) return;
-      clearRoutes();
-      if (!routePlan || !Array.isArray(routePlan.routes) || !routePlan.routes.length) return;
-
-      const activeId = selectedRouteId || routePlan.recommended_id;
-      const bounds = new kakao.maps.LatLngBounds();
-      const ordered = [...routePlan.routes].sort((a,b) => Number(a.id === activeId) - Number(b.id === activeId));
-      ordered.forEach(route => {
-        const isActive = route.id === activeId;
-        const path = (route.path || []).map(point => {
-          const latlng = new kakao.maps.LatLng(Number(point[1]), Number(point[0]));
-          if (isActive) bounds.extend(latlng);
-          return latlng;
-        });
-        if (path.length < 2) return;
-        const line = new kakao.maps.Polyline({
-          path,
-          strokeWeight:isActive ? 7 : 5,
-          strokeColor:isActive ? "#2563eb" : "#9aa5b1",
-          strokeOpacity:isActive ? .95 : .75,
-          strokeStyle:"solid",
-          zIndex:isActive ? 6 : 2,
-        });
-        line.setMap(map);
-        routeObjects.push(line);
-      });
-
-      const activeRoute = routePlan.routes.find(route => route.id === activeId) || routePlan.routes[0];
-      (activeRoute.danger_points || []).forEach(point => {
-        const ring = document.createElement("div");
-        ring.className = "danger-ring";
-        ring.style.pointerEvents = "auto";
-        ring.style.cursor = "pointer";
-        ring.title = `${label(point)} · 위험도 ${pct(point.risk_score)}`;
-        ring.addEventListener("click", () => selectRow(point.grid_id, true));
-        const overlay = new kakao.maps.CustomOverlay({
-          position:new kakao.maps.LatLng(Number(point.lat), Number(point.lon)),
-          content:ring,
-          xAnchor:.5,
-          yAnchor:.5,
-          zIndex:7,
-        });
-        overlay.setMap(map);
-        routeObjects.push(overlay);
-        dangerRingEls.push(ring);
-      });
-      updateDangerRingVisibility();
-
-      bounds.extend(new kakao.maps.LatLng(Number(routePlan.origin.lat), Number(routePlan.origin.lon)));
-      bounds.extend(new kakao.maps.LatLng(Number(routePlan.destination.lat), Number(routePlan.destination.lon)));
-      routePin("출", "#2563eb", routePlan.origin);
-      routePin("도", "#d93b36", routePlan.destination);
-      map.setBounds(bounds, 70, 60, 70, 60);
-
-      const badge = document.getElementById("routeBadge");
-      badge.style.display = "block";
-      const badgeSub = activeId === routePlan.recommended_id
-        ? routePlan.message
-        : `${Math.round(activeRoute.duration_s/60)}분 · ${(activeRoute.distance_m/1000).toFixed(1)}km · 위험 격자 ${activeRoute.high_risk_count}개`;
-      badge.innerHTML = `<b>${esc(activeRoute.label)}</b><span>${esc(badgeSub)}</span>`;
-    }
-
     function initMap() {
       const valid = rows.filter(r => Number.isFinite(Number(r.grid_lat)) && Number.isFinite(Number(r.grid_lon)));
       if (!valid.length) { showMapError("표시할 좌표가 없습니더", "예측 CSV의 위도·경도를 확인하십시오."); return; }
@@ -277,7 +169,6 @@
       const avgLon = valid.reduce((s,r) => s + Number(r.grid_lon), 0) / valid.length;
       map = new kakao.maps.Map(document.getElementById("map"), {center:new kakao.maps.LatLng(avgLat,avgLon),level:11});
       map.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
-      kakao.maps.event.addListener(map, "zoom_changed", updateDangerRingVisibility);
       const HIGH_RISK_LEVELS = new Set(["매우 높음", "높음"]);
       const clusterMarkers = {high: [], normal: []};
       valid.forEach(r => {
@@ -308,7 +199,6 @@
           disableClickZoom: false, styles: clusterStyle("#ff5c4d"),
         }),
       ];
-      renderRoutePlan();
     }
 
     function initialize() {
@@ -325,11 +215,9 @@
       if (event.data?.type !== "streamlit:render") return;
       rows = Array.isArray(event.data.args?.rows) ? event.data.args.rows : [];
       kakaoKey = String(event.data.args?.appKey || "");
-      routePlan = event.data.args?.routePlan || null;
-      selectedRouteId = event.data.args?.selectedRouteId || null;
       const height = Number(event.data.args?.componentHeight || 730);
       send("streamlit:setFrameHeight", {height});
-      if (!initialized) { initialized = true; initialize(); } else { renderList(); renderRoutePlan(); }
+      if (!initialized) { initialized = true; initialize(); } else { renderList(); }
     });
     document.getElementById("search").addEventListener("input", renderList);
     document.getElementById("riskFilter").addEventListener("change", renderList);

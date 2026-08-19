@@ -26,30 +26,39 @@ WEATHER_COLUMNS = [
 ]
 
 BASE_FEATURE_COLUMNS = [
-    "grid_lat",
-    "grid_lon",
+    "avg_temp",
+    "min_temp",
+    "max_temp",
+    "temp_range",
+    "precipitation",
     "precip_3d",
     "precip_7d",
+    "snowfall",
+    "humidity",
+    "freeze_thaw",
     "freeze_thaw_7d",
+    "past_potholes_30d",
     "past_potholes_90d",
     "past_potholes_total",
-    "has_repair_history",
     "days_since_last_repair",
+    "month",
+    "day_of_year_sin",
+    "day_of_year_cos",
 ]
-OPTIONAL_FEATURE_COLUMNS = ["traffic_volume", "road_importance"]
+OPTIONAL_FEATURE_COLUMNS: list[str] = []
 
 # 기존 코드에서 import하던 이름을 유지하되, 실제 학습 컬럼은 select_feature_columns로 정합니다.
 FEATURE_COLUMNS = BASE_FEATURE_COLUMNS
 
 FEATURE_GROUPS = {
-    "spatial": ["grid_lat", "grid_lon"],
-    "precipitation": ["precip_3d", "precip_7d"],
-    "freeze_thaw": ["freeze_thaw_7d"],
-    "recent_recurrence": ["past_potholes_90d"],
+    "temperature": ["avg_temp", "min_temp", "max_temp", "temp_range"],
+    "precipitation": ["precipitation", "precip_3d", "precip_7d"],
+    "freeze_thaw": ["freeze_thaw", "freeze_thaw_7d"],
+    "snow_humidity": ["snowfall", "humidity"],
+    "recent_recurrence": ["past_potholes_30d", "past_potholes_90d"],
     "long_term_history": ["past_potholes_total"],
-    "repair": ["has_repair_history", "days_since_last_repair"],
-    "traffic": ["traffic_volume"],
-    "road_importance": ["road_importance"],
+    "repair": ["days_since_last_repair"],
+    "seasonality": ["month", "day_of_year_sin", "day_of_year_cos"],
 }
 
 
@@ -155,6 +164,7 @@ def map_grids_to_stations(grid_catalog: pd.DataFrame, weather: pd.DataFrame) -> 
 
 def engineer_weather_features(weather: pd.DataFrame) -> pd.DataFrame:
     df = weather.copy().sort_values(["station_id", "date"])
+    df["temp_range"] = df["max_temp"] - df["min_temp"]
     df["freeze_thaw"] = ((df["min_temp"] < 0) & (df["max_temp"] > 0)).astype(int)
     grouped = df.groupby("station_id", group_keys=False)
     df["precip_3d"] = grouped["precipitation"].transform(
@@ -215,17 +225,25 @@ def build_daily_panel(
 
     panel = panel.sort_values(["grid_id", "date"])
     shifted = panel.groupby("grid_id")["pothole_count"].shift(1).fillna(0)
+    panel["past_potholes_30d"] = shifted.groupby(panel["grid_id"]).transform(
+        lambda series: series.rolling(30, min_periods=1).sum()
+    )
     panel["past_potholes_90d"] = shifted.groupby(panel["grid_id"]).transform(
         lambda series: series.rolling(90, min_periods=1).sum()
     )
     panel["past_potholes_total"] = shifted.groupby(panel["grid_id"]).cumsum()
     panel = add_days_since_last_repair(panel, repairs)
 
+    panel["month"] = panel["date"].dt.month
+    day_of_year = panel["date"].dt.dayofyear.astype(float)
+    panel["day_of_year_sin"] = np.sin(2 * np.pi * day_of_year / 365.25)
+    panel["day_of_year_cos"] = np.cos(2 * np.pi * day_of_year / 365.25)
+
     if include_target:
         future_count = panel.groupby("grid_id")["pothole_count"].transform(
             lambda series: _forward_window_count(series, target_horizon_days)
         )
-        panel = panel.loc[future_count.notna()].copy()
+        panel = panel.loc[future_count.notna()]
         panel["target_next_30d"] = (future_count.loc[panel.index] > 0).astype(int)
         panel["target"] = panel["target_next_30d"]
 
@@ -435,24 +453,22 @@ def risk_level_from_percentile(percentile: float) -> str:
 
 
 def _reason_text(group: str, row: pd.Series) -> str:
-    if group == "spatial":
-        return "격자 위치의 공간 위험 패턴"
+    if group == "temperature":
+        return f"기온 변동 영향(일교차 {row['temp_range']:.1f}℃, 평균 {row['avg_temp']:.1f}℃)"
     if group == "precipitation":
-        return f"누적강수 영향(3일 {row['precip_3d']:.1f}mm, 7일 {row['precip_7d']:.1f}mm)"
+        return f"누적강수 영향(당일 {row['precipitation']:.1f}mm, 7일 {row['precip_7d']:.1f}mm)"
     if group == "freeze_thaw":
         return f"최근 7일 동결·융해 {row['freeze_thaw_7d']:.0f}회"
+    if group == "snow_humidity":
+        return f"적설·습도 영향(적설 {row['snowfall']:.1f}mm, 습도 {row['humidity']:.0f}%)"
     if group == "recent_recurrence":
-        return f"최근 90일 포트홀 {row['past_potholes_90d']:.0f}건"
+        return f"최근 30일 포트홀 {row['past_potholes_30d']:.0f}건"
     if group == "long_term_history":
         return f"과거 누적 포트홀 {row['past_potholes_total']:.0f}건"
     if group == "repair":
-        if int(row["has_repair_history"]) == 0:
-            return "보수이력 없음의 모델 기여"
         return f"보수 후 {row['days_since_last_repair']:.0f}일 경과 영향"
-    if group == "traffic":
-        return f"교통량 영향({row['traffic_volume']:.0f})"
-    if group == "road_importance":
-        return f"도로중요도 영향({row['road_importance']:.2f})"
+    if group == "seasonality":
+        return f"계절적 시기 영향({int(row['month'])}월)"
     return group
 
 
