@@ -17,6 +17,7 @@ MAP_COLUMNS = [
     "risk_score",
     "risk_level",
     "risk_reason",
+    "road_risk_score",
     "priority_score",
     "priority_rank",
     "recurrence_score",

@@ -1,6 +1,6 @@
 {
   "schema_version": "2.0",
-  "trained_at_utc": "2026-08-19T08:31:15.058908+00:00",
+  "trained_at_utc": "2026-08-19T13:46:12.965094+00:00",
   "target": "기준일 다음 30일 내 포트홀 발생 여부",
   "features": [
     "avg_temp",
@@ -34,24 +34,113 @@
     "train_negative": 6234260,
     "scale_pos_weight": 3587.0310701956273
   },
+  "road_structure_statistics": {
+    "lanes_weight": 0.2,
+    "road_rank_weight": 0.8,
+    "lanes": {
+      "base_rate": 0.0037047798924887405,
+      "smoothing_strength": 100.0,
+      "categories": {
+        "1": {
+          "count": 8647,
+          "positives": 35,
+          "smoothed_rate": 0.004043726762232637,
+          "lift": 1.091489070762637
+        },
+        "2": {
+          "count": 4711,
+          "positives": 13,
+          "smoothed_rate": 0.002779147368374324,
+          "lift": 0.7501518171184499
+        },
+        "3": {
+          "count": 342,
+          "positives": 3,
+          "smoothed_rate": 0.007625515812780258,
+          "lift": 2.058291189779079
+        },
+        "4": {
+          "count": 51,
+          "positives": 0,
+          "smoothed_rate": 0.002453496617542212,
+          "lift": 0.662251655629139
+        },
+        "5": {
+          "count": 15,
+          "positives": 0,
+          "smoothed_rate": 0.0032215477325989047,
+          "lift": 0.8695652173913043
+        }
+      }
+    },
+    "road_rank": {
+      "base_rate": 0.0037047798924887405,
+      "smoothing_strength": 100.0,
+      "categories": {
+        "101": {
+          "count": 1764,
+          "positives": 2,
+          "smoothed_rate": 0.0012717156594682802,
+          "lift": 0.34326348565177145
+        },
+        "102": {
+          "count": 2,
+          "positives": 0,
+          "smoothed_rate": 0.003632137149498765,
+          "lift": 0.9803921568627451
+        },
+        "103": {
+          "count": 4919,
+          "positives": 19,
+          "smoothed_rate": 0.003859429764743748,
+          "lift": 1.0417433361071065
+        },
+        "104": {
+          "count": 314,
+          "positives": 6,
+          "smoothed_rate": 0.01538762799335477,
+          "lift": 4.153452685421995
+        },
+        "105": {
+          "count": 1333,
+          "positives": 6,
+          "smoothed_rate": 0.004445553377005495,
+          "lift": 1.1999507409383852
+        },
+        "106": {
+          "count": 5063,
+          "positives": 16,
+          "smoothed_rate": 0.003170729806168676,
+          "lift": 0.8558483629748626
+        },
+        "107": {
+          "count": 371,
+          "positives": 2,
+          "smoothed_rate": 0.005032861972927546,
+          "lift": 1.358477998418051
+        }
+      }
+    }
+  },
   "metrics": {
     "validation": {
-      "roc_auc": 0.7379049641044811,
-      "pr_auc": 0.04986043278251685,
+      "roc_auc": 0.7360086490191138,
+      "pr_auc": 0.04975098869719541,
       "f1": 0.1614075905191217,
-      "threshold": 0.5245950818061829,
+      "threshold": 0.5245897173881531,
       "positive_rate": 0.0007444151567353659
     },
     "test": {
-      "roc_auc": 0.6888495692346894,
-      "pr_auc": 0.011064069676422318,
+      "roc_auc": 0.6764827854915973,
+      "pr_auc": 0.011038010294886333,
       "f1": 0.050206440957886046,
-      "threshold": 0.5245950818061829,
+      "threshold": 0.5245897173881531,
       "positive_rate": 0.00019769203627986135
     }
   },
   "notes": [
     "F1 임계값은 validation에서 선택하고 test에는 그대로 적용했습니다.",
-    "risk_score는 순위화를 위한 모델 점수이며 별도 확률 보정 전에는 절대 발생확률로 해석하지 않습니다."
+    "risk_score는 순위화를 위한 모델 점수이며 별도 확률 보정 전에는 절대 발생확률로 해석하지 않습니다.",
+    "도로 구조 속성은 XGBoost 학습 feature에는 포함하지 않고 화면용 종합 위험지수에만 사용합니다."
   ]
 }

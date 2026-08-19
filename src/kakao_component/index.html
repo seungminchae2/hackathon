@@ -25,14 +25,13 @@
     input, select { width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 11px; background:#fff; color:var(--ink); outline:none; }
     input:focus, select:focus { border-color:#64a88e; box-shadow:0 0 0 3px rgba(13,107,79,.08); }
     .list { flex:1; min-height:0; overflow:auto; padding:10px; }
-    .card { width:100%; display:grid; grid-template-columns:42px 1fr auto; gap:10px; align-items:center; border:1px solid transparent; border-bottom-color:var(--line); background:transparent; padding:12px 8px; text-align:left; cursor:pointer; color:inherit; }
+    .card { width:100%; display:grid; grid-template-columns:18px 44px 1fr 46px; gap:8px; align-items:center; border:1px solid transparent; border-bottom-color:var(--line); background:transparent; padding:12px 8px; text-align:left; cursor:pointer; color:inherit; }
     .card:hover, .card.active { background:#fff; border-color:#cfdad3; border-radius:12px; box-shadow:0 5px 16px rgba(16,35,28,.06); }
-    .rank { display:grid; place-items:center; width:36px; height:36px; border-radius:11px; background:#edf2ee; color:var(--green); font-weight:850; font-size:13px; }
+    .rank { text-align:center; color:var(--muted); font-weight:750; font-size:11px; }
+    .score-inline { text-align:right; font-weight:850; font-size:13px; white-space:nowrap; }
     .name { font-weight:780; font-size:14px; }
     .reason { margin-top:4px; color:var(--muted); font-size:11px; line-height:1.35; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
-    .scores { text-align:right; }
-    .score { font-weight:850; font-size:15px; }
-    .level { margin-top:3px; font-size:10px; font-weight:750; }
+    .level { text-align:right; font-size:10px; font-weight:750; white-space:nowrap; word-break:keep-all; }
     .detail { display:none; padding:14px 18px 18px; border-top:1px solid var(--line); background:#fff; }
     .detail.show { display:block; }
     .detail-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
@@ -61,7 +60,7 @@
     <aside class="side">
       <header class="side-head">
         <div class="eyebrow">MAINTENANCE QUEUE</div>
-        <h2>우선 보수 대상</h2>
+        <h2>당일 상대 위험도 순위</h2>
         <div class="sub" id="countText">격자 목록을 불러오는 중</div>
         <div class="controls">
           <input id="search" placeholder="격자 ID 검색" />
@@ -101,12 +100,13 @@
 
     function renderList() {
       const filtered = filteredRows();
-      document.getElementById("countText").textContent = `${filtered.length.toLocaleString("ko-KR")}개 격자 · priority_score 순`;
-      document.getElementById("list").innerHTML = filtered.length ? filtered.map(r => `
+      document.getElementById("countText").textContent = `${filtered.length.toLocaleString("ko-KR")}개 격자 · 당일 상대 위험도 순`;
+      document.getElementById("list").innerHTML = filtered.length ? filtered.map((r, i) => `
         <button class="card ${selectedId === r.grid_id ? "active" : ""}" data-id="${esc(r.grid_id)}">
-          <span class="rank">${esc(r.priority_rank)}</span>
+          <span class="rank">${i + 1}</span>
+          <span class="score-inline" style="color:${colors[r.risk_level] || "#66756f"}">${num(r.road_risk_score, "점")}</span>
           <span><span class="name">${esc(label(r))}</span><span class="reason">${esc(r.risk_reason)}</span></span>
-          <span class="scores"><span class="score">${pct(r.priority_score)}</span><span class="level" style="color:${colors[r.risk_level] || "#66756f"}">${esc(r.risk_level)}</span></span>
+          <span class="level" style="color:${colors[r.risk_level] || "#66756f"}">${esc(r.risk_level)}</span>
         </button>`).join("") : '<div class="empty-list">조건에 맞는 격자가 없습니더.</div>';
       document.querySelectorAll(".card").forEach(el => el.addEventListener("click", () => selectRow(el.dataset.id, true)));
     }
@@ -214,6 +214,7 @@
     window.addEventListener("message", event => {
       if (event.data?.type !== "streamlit:render") return;
       rows = Array.isArray(event.data.args?.rows) ? event.data.args.rows : [];
+      rows = rows.slice().sort((a, b) => (Number(b.road_risk_score) || 0) - (Number(a.road_risk_score) || 0));
       kakaoKey = String(event.data.args?.appKey || "");
       const height = Number(event.data.args?.componentHeight || 730);
       send("streamlit:setFrameHeight", {height});
