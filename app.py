@@ -14,7 +14,6 @@ import streamlit as st
 from src.common import load_config, resolve_path
 from src.features import risk_level_from_percentile
 from src.kakao_route_component import show_kakao_map
-from src.routing import KakaoApiError, build_safe_route_plan
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -61,13 +60,25 @@ def normalize_predictions(frame: pd.DataFrame) -> pd.DataFrame:
         "priority_rank",
         "recurrence_score",
         "importance_score",
+        "avg_temp",
+        "min_temp",
+        "max_temp",
+        "temp_range",
+        "precipitation",
         "precip_3d",
         "precip_7d",
+        "snowfall",
+        "humidity",
+        "freeze_thaw",
         "freeze_thaw_7d",
+        "past_potholes_30d",
         "past_potholes_90d",
         "past_potholes_total",
         "has_repair_history",
         "days_since_last_repair",
+        "month",
+        "day_of_year_sin",
+        "day_of_year_cos",
     ]
     for column in numeric_columns:
         if column in out.columns:
@@ -155,8 +166,6 @@ pred = attach_road_authority(pred, BASE_DIR / "data" / "road_authorities.csv")
 
 key_env_name = config.get("kakao", {}).get("app_key_env", "KAKAO_MAP_APP_KEY")
 kakao_key = os.getenv(key_env_name, "").strip()
-rest_key_env_name = config.get("kakao", {}).get("rest_api_key_env", "KAKAO_REST_API_KEY")
-kakao_rest_key = os.getenv(rest_key_env_name, "").strip()
 
 st.title("Road Doctor")
 st.caption("전북 500m 격자별 포트홀 상대 위험도 · 모델 위험 + 재발 위험 + 도로 중요도 기반 보수 우선순위")
@@ -175,89 +184,7 @@ if not kakao_key:
         f"`{key_env_name}=발급받은_JavaScript_키`를 입력하십시오. 목록은 키 없이도 동작합니다."
     )
 
-st.subheader("포트홀 위험 회피 경로")
-with st.form("safe_route_form", border=True):
-    route_col1, route_col2, route_col3 = st.columns([1, 1, 0.32], vertical_alignment="bottom")
-    with route_col1:
-        origin_query = st.text_input(
-            "출발지",
-            placeholder="예: 전북대학교 또는 전주시 덕진구 백제대로 567",
-        )
-    with route_col2:
-        destination_query = st.text_input(
-            "도착지",
-            placeholder="예: 전주역 또는 전주시 덕진구 동부대로 680",
-        )
-    with route_col3:
-        route_submitted = st.form_submit_button("안전 경로 찾기", type="primary", width="stretch")
-
-if route_submitted:
-    if not kakao_rest_key:
-        st.error(
-            f"길찾기에는 REST API 키가 필요합니다. `.env`에 "
-            f"`{rest_key_env_name}=발급받은_REST_API_키`를 추가하십시오."
-        )
-    else:
-        try:
-            with st.spinner("대안 경로와 포트홀 위험 구간을 비교하고 있습니더..."):
-                new_plan = build_safe_route_plan(
-                    origin_query,
-                    destination_query,
-                    kakao_rest_key,
-                    pred,
-                )
-            st.session_state["safe_route_plan"] = new_plan
-            st.session_state["selected_route_id"] = new_plan["recommended_id"]
-        except KakaoApiError as exc:
-            st.session_state.pop("safe_route_plan", None)
-            st.error(str(exc))
-
-route_plan = st.session_state.get("safe_route_plan")
-selected_route_id = None
-if route_plan:
-    if route_plan["is_detour"]:
-        st.success(f"안전 우회 경로 추천: {route_plan['message']}")
-    else:
-        st.info(route_plan["message"])
-
-    routes = route_plan["routes"]
-    selected_route_id = st.session_state.get("selected_route_id")
-    if selected_route_id not in {r["id"] for r in routes}:
-        selected_route_id = route_plan["recommended_id"]
-        st.session_state["selected_route_id"] = selected_route_id
-
-    st.caption("경로를 선택하면 아래 지도에 파란색으로 강조 표시되고, 나머지는 회색으로 표시됩니다.")
-    route_cols = st.columns(len(routes))
-    for col, route in zip(route_cols, routes):
-        is_selected = route["id"] == selected_route_id
-        with col.container(border=True):
-            badge = " ⭐ 추천" if route["id"] == route_plan["recommended_id"] else ""
-            st.markdown(f"**{route['label']}**{badge}")
-            st.markdown(
-                f"{route['duration_s']/60:.0f}분 · {route['distance_m']/1000:.1f}km · "
-                f"위험 격자 {route['high_risk_count']}개"
-            )
-            if st.button(
-                "선택됨" if is_selected else "이 경로 선택",
-                key=f"route_pick_{route['id']}",
-                type="primary" if is_selected else "secondary",
-                width="stretch",
-                disabled=is_selected,
-            ):
-                st.session_state["selected_route_id"] = route["id"]
-                st.rerun()
-
-    selected_route = next(r for r in routes if r["id"] == selected_route_id)
-    route_m1, route_m2, route_m3, route_m4 = st.columns(4)
-    route_m1.metric("선택한 경로", selected_route["label"])
-    route_m2.metric("예상 시간", f"{selected_route['duration_s']/60:.0f}분")
-    route_m3.metric("이동 거리", f"{selected_route['distance_m']/1000:.1f}km")
-    route_m4.metric("고위험 격자", f"{selected_route['high_risk_count']}개")
-    road_names = selected_route.get("road_names") or []
-    if road_names:
-        st.caption("주요 통과 도로: " + " · ".join(road_names))
-
-show_kakao_map(pred, kakao_key, height=730, route_plan=route_plan, selected_route_id=selected_route_id)
+show_kakao_map(pred, kakao_key, height=730)
 
 tab_components, tab_model, tab_raw = st.tabs(["우선순위 구성", "모델 검증", "전체 예측 데이터"])
 with tab_components:
