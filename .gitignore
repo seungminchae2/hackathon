@@ -2,3 +2,14 @@ venv/
 .venv/
 *.venv/ 
 *.venv.*/
+hwanseo/
+.env
+__pycache__/
+*.pyc
+example.csv
+
+# 국가교통정보센터 원본 shp (용량 큼, roads.csv로 변환한 결과물만 커밋)
+data/MOCT_LINK.*
+data/MOCT_NODE.*
+data/MULTILINK.dbf
+data/TURNINFO.dbf
