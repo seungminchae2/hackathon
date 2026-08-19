@@ -11,8 +11,14 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from src.common import load_config, resolve_path
-from src.kakao_route_component import show_kakao_map
+from src.common import (
+    load_config,
+    resolve_path,
+)
+
+from src.kakao_route_component import (
+    show_kakao_map,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -22,7 +28,10 @@ BASE_DIR = Path(__file__).resolve().parent
 # 환경변수
 # ==========================================================
 
-def load_app_env(path: Path) -> None:
+def load_app_env(
+    path: Path,
+) -> None:
+
     if not path.exists():
         return
 
@@ -55,6 +64,7 @@ def load_app_env(path: Path) -> None:
 load_app_env(
     BASE_DIR / ".env"
 )
+
 
 config = load_config(
     BASE_DIR / "config.yaml"
@@ -104,20 +114,20 @@ st.markdown(
 
 
 # ==========================================================
-# 위험등급 fallback
+# 위험등급
 # ==========================================================
 
 def relative_risk_level(
     score: float,
 ) -> str:
 
-    if score >= 60:
+    if score >= 85:
         return "매우 높음"
 
-    if score >= 30:
+    if score >= 70:
         return "높음"
 
-    if score >= 20:
+    if score >= 40:
         return "보통"
 
     return "낮음"
@@ -168,7 +178,9 @@ def normalize_bool(
     value: object,
 ) -> bool:
 
-    if pd.isna(value):
+    if pd.isna(
+        value
+    ):
         return False
 
     if isinstance(
@@ -202,12 +214,15 @@ def normalize_predictions(
     out = frame.copy()
 
     if "grid_id" not in out.columns:
+
         raise ValueError(
             "예측 CSV에 grid_id 컬럼이 없습니다."
         )
 
     out["grid_id"] = (
-        out["grid_id"]
+        out[
+            "grid_id"
+        ]
         .astype(str)
     )
 
@@ -285,10 +300,17 @@ def normalize_predictions(
     # ------------------------------------------------------
 
     if "risk_score" not in out.columns:
-        out["risk_score"] = 0.0
 
-    out["risk_score"] = (
-        out["risk_score"]
+        out[
+            "risk_score"
+        ] = 0.0
+
+    out[
+        "risk_score"
+    ] = (
+        out[
+            "risk_score"
+        ]
         .fillna(0.0)
         .clip(
             0.0,
@@ -300,10 +322,17 @@ def normalize_predictions(
     # 모델 percentile fallback
     # ------------------------------------------------------
 
-    if "risk_percentile" not in out.columns:
+    if (
+        "risk_percentile"
+        not in out.columns
+    ):
 
-        out["risk_percentile"] = (
-            out["risk_score"]
+        out[
+            "risk_percentile"
+        ] = (
+            out[
+                "risk_score"
+            ]
             .rank(
                 method="average",
                 pct=True,
@@ -312,10 +341,12 @@ def normalize_predictions(
 
     # ------------------------------------------------------
     # 상대 위험점수
-    # 최신 predict.py 결과가 있으면 그대로 사용
     # ------------------------------------------------------
 
-    if "road_risk_score" not in out.columns:
+    if (
+        "road_risk_score"
+        not in out.columns
+    ):
 
         out[
             "road_risk_score"
@@ -350,47 +381,23 @@ def normalize_predictions(
 
     # ------------------------------------------------------
     # 상대 위험등급
+    #
+    # 85 이상 : 매우 높음
+    # 70 이상 : 높음
+    # 40 이상 : 보통
+    # 40 미만 : 낮음
     # ------------------------------------------------------
 
-    if "risk_level" not in out.columns:
-
+    out[
+        "risk_level"
+    ] = (
         out[
-            "risk_level"
-        ] = (
-            out[
-                "road_risk_score"
-            ]
-            .map(
-                relative_risk_level
-            )
+            "road_risk_score"
+        ]
+        .map(
+            relative_risk_level
         )
-
-    else:
-
-        missing = (
-            out[
-                "risk_level"
-            ].isna()
-            | out[
-                "risk_level"
-            ]
-            .astype(str)
-            .str.strip()
-            .eq("")
-        )
-
-        out.loc[
-            missing,
-            "risk_level",
-        ] = (
-            out.loc[
-                missing,
-                "road_risk_score",
-            ]
-            .map(
-                relative_risk_level
-            )
-        )
+    )
 
     # ------------------------------------------------------
     # 상대 상위 %
@@ -467,23 +474,23 @@ def normalize_predictions(
 
     # ------------------------------------------------------
     # 절대 위험등급
+    #
+    # 80 이상 : 매우 높음
+    # 60 이상 : 높음
+    # 40 이상 : 보통
+    # 40 미만 : 낮음
     # ------------------------------------------------------
 
-    if (
+    out[
         "absolute_risk_level"
-        not in out.columns
-    ):
-
+    ] = (
         out[
-            "absolute_risk_level"
-        ] = (
-            out[
-                "absolute_risk_score"
-            ]
-            .map(
-                absolute_risk_level
-            )
+            "absolute_risk_score"
+        ]
+        .map(
+            absolute_risk_level
         )
+    )
 
     # ------------------------------------------------------
     # 포트홀 이력
@@ -496,11 +503,18 @@ def normalize_predictions(
     ]:
 
         if column not in out.columns:
-            out[column] = 0.0
 
-        out[column] = (
+            out[
+                column
+            ] = 0.0
+
+        out[
+            column
+        ] = (
             pd.to_numeric(
-                out[column],
+                out[
+                    column
+                ],
                 errors="coerce",
             )
             .fillna(0.0)
@@ -535,7 +549,10 @@ def normalize_predictions(
     # Trigger
     # ------------------------------------------------------
 
-    if "risk_trigger" not in out.columns:
+    if (
+        "risk_trigger"
+        not in out.columns
+    ):
 
         out[
             "risk_trigger"
@@ -555,7 +572,10 @@ def normalize_predictions(
     # AI 위험근거
     # ------------------------------------------------------
 
-    if "risk_reason" not in out.columns:
+    if (
+        "risk_reason"
+        not in out.columns
+    ):
 
         out[
             "risk_reason"
@@ -597,10 +617,12 @@ def normalize_predictions(
 
     # ------------------------------------------------------
     # 조치 단계
-    # 최신 predict.py 결과 우선
     # ------------------------------------------------------
 
-    if "action_level" not in out.columns:
+    if (
+        "action_level"
+        not in out.columns
+    ):
 
         out[
             "action_level"
@@ -612,23 +634,29 @@ def normalize_predictions(
                     "absolute_risk_score"
                 ] >= 40
             )
-            | (
+            |
+            (
                 out[
                     "relative_top_percent"
                 ] <= 5
             )
-            | (
+            |
+            (
                 out[
                     "risk_trigger"
-                ].ne("없음")
+                ].ne(
+                    "없음"
+                )
             ),
             "action_level",
         ] = "우선점검"
 
         out.loc[
-            out[
-                "absolute_risk_score"
-            ] >= 60,
+            (
+                out[
+                    "absolute_risk_score"
+                ] >= 60
+            ),
             "action_level",
         ] = "긴급점검"
 
@@ -680,7 +708,9 @@ def normalize_predictions(
             "recurrence_score"
         ] = (
             source
-            .div(scale)
+            .div(
+                scale
+            )
             .clip(
                 upper=1.0
             )
@@ -703,7 +733,10 @@ def normalize_predictions(
     # 주소 fallback
     # ------------------------------------------------------
 
-    if "address" not in out.columns:
+    if (
+        "address"
+        not in out.columns
+    ):
 
         out[
             "address"
@@ -719,7 +752,8 @@ def normalize_predictions(
             out[
                 "address"
             ].isna()
-            | out[
+            |
+            out[
                 "address"
             ]
             .astype(str)
@@ -739,10 +773,12 @@ def normalize_predictions(
 
     # ------------------------------------------------------
     # action_rank
-    # predict.py 결과 우선
     # ------------------------------------------------------
 
-    if "action_rank" not in out.columns:
+    if (
+        "action_rank"
+        not in out.columns
+    ):
 
         action_order = {
             "예방보수": 4,
@@ -788,8 +824,7 @@ def normalize_predictions(
         out[
             "action_rank"
         ] = (
-            out.index
-            + 1
+            out.index + 1
         )
 
         out = (
@@ -845,8 +880,7 @@ def attach_road_authority(
 
     if (
         not path.exists()
-        or "address"
-        not in out.columns
+        or "address" not in out.columns
     ):
         return out
 
@@ -948,7 +982,11 @@ if pred.empty:
 current_prediction_date = str(
     pred.get(
         "prediction_date",
-        pd.Series([""]),
+        pd.Series(
+            [
+                "-"
+            ]
+        ),
     ).iloc[0]
 )
 
@@ -966,7 +1004,10 @@ if (
 
     banner_col, button_col = (
         st.columns(
-            [5, 1],
+            [
+                5,
+                1,
+            ],
             vertical_alignment="center",
         )
     )
@@ -984,9 +1025,8 @@ if (
     ):
 
         with st.spinner(
-            "오늘 날짜 기준으로 예측을 "
-            "갱신하는 중입니다... "
-            "(몇 분 걸릴 수 있습니다)"
+            "기상청 최신 단기예보를 불러오고 "
+            "오늘 기준 위험도를 갱신하는 중입니다..."
         ):
 
             try:
@@ -1018,8 +1058,8 @@ if (
         if result.returncode == 0:
 
             st.success(
-                "갱신 완료. "
-                "최신 데이터를 불러옵니다."
+                "기상청 단기예보 반영 및 "
+                "위험도 갱신이 완료되었습니다."
             )
 
             st.rerun()
@@ -1232,59 +1272,45 @@ Road Doctor는 단순히 위험점수 하나만으로
 | 조치 단계 | 판정 기준 | 대응 |
 |---|---|---|
 | 🟢 **모니터링** | 별도의 위험조건에 해당하지 않는 도로 | AI 위험도 지속 관찰 |
-| 🟡 **우선점검** | 절대위험 **40점 이상** 또는 당일 위험도 **상위 5%** 또는 위험 Trigger 존재 | 현장 점검 우선 배정 |
-| 🟠 **긴급점검** | 절대위험 **60점 이상** 또는 강한 위험 Trigger 발생 | 신속한 현장 확인 |
-| 🔴 **예방보수** | 절대위험 **80점 이상** + 강한 위험 Trigger + 당일 위험도 **상위 5%** | 포트홀 발생 전 선제적 보수 |
-
----
-
-### 🚨 강한 위험 Trigger
-
-현재 강한 위험 Trigger는 다음 두 가지입니다.
-
-- **최근 30일 포트홀 이력 + 최근 7일 동결·융해 3회 이상**
-- **최근 90일 포트홀 이력 + 최근 7일 동결·융해 3회 이상**
-
-과거 데이터 분석에서
-
-**최근 30일 포트홀 이력 + 동결·융해 3회 이상**
-
-조건은 전체 평균 대비 약 **309배의 Lift**가
-확인되었습니다.
-
-따라서 절대 위험점수가 60점에 도달하지 않더라도
-강한 위험 Trigger가 발생하면
-**긴급점검 대상으로 상향**합니다.
+| 🟡 **우선점검** | 절대위험 40점 이상 또는 당일 위험도 상위 5% 또는 위험 Trigger 존재 | 현장 점검 우선 배정 |
+| 🟠 **긴급점검** | 절대위험 60점 이상 또는 강한 위험 Trigger 발생 | 신속한 현장 확인 |
+| 🔴 **예방보수** | 절대위험 80점 이상 + 강한 위험 Trigger + 당일 위험도 상위 5% | 포트홀 발생 전 선제적 보수 |
 
 ---
 
 ### 상대 위험도
 
-**오늘 어떤 도로부터 먼저 확인할 것인가?**
+**오늘 다른 도로와 비교했을 때 어느 도로가 더 위험한가?**
 
-같은 예측일의 도로들을 비교하여
-당일 점검 우선순위를 판단합니다.
+- 85점 이상 → 매우 높음
+- 70점 이상 → 높음
+- 40점 이상 → 보통
+- 40점 미만 → 낮음
 
 ### 절대 위험도
 
 **현재 해당 도로 자체의 위험요인이 얼마나 누적됐는가?**
 
-포트홀 이력, 보수 경과, 동결·융해,
-강수, 도로 구조 등을 종합하여 평가합니다.
+- 80점 이상 → 매우 높음
+- 60점 이상 → 높음
+- 40점 이상 → 보통
+- 40점 미만 → 낮음
 
----
+따라서 예를 들어,
 
-### 최종 대응 흐름
+**상대 위험도 85점 / 매우 높음**이면서  
+**절대 위험도 35점 / 낮음**
 
-**모니터링 → 우선점검 → 긴급점검 → 예방보수**
+일 수 있습니다.
+
+이는 현재 전체 도로 중에서는 상대적으로 매우 위험하지만,
+절대적인 위험요인 누적 수준은 아직 낮다는 의미입니다.
         """
     )
 
 
 # ==========================================================
 # Kakao 지도
-#
-# 안전 우회경로 기능 제거
 # ==========================================================
 
 if not kakao_key:
@@ -1344,7 +1370,10 @@ with tab_action:
         "action_level",
 
         "road_risk_score",
+        "risk_level",
+
         "absolute_risk_score",
+        "absolute_risk_level",
 
         "relative_top_percent",
 
@@ -1413,12 +1442,22 @@ with tab_action:
                     format="%.1f점",
                 ),
 
+            "risk_level":
+                st.column_config.TextColumn(
+                    "상대 위험등급"
+                ),
+
             "absolute_risk_score":
                 st.column_config.ProgressColumn(
                     "절대 위험도",
                     min_value=0,
                     max_value=100,
                     format="%.1f점",
+                ),
+
+            "absolute_risk_level":
+                st.column_config.TextColumn(
+                    "절대 위험등급"
                 ),
 
             "relative_top_percent":
@@ -1472,25 +1511,25 @@ with tab_risk:
     with r1:
 
         st.markdown(
-            "#### 조치 단계"
+            "#### 상대 위험등급"
         )
 
-        action_summary = (
+        relative_summary = (
             pred[
-                "action_level"
+                "risk_level"
             ]
             .value_counts()
             .reindex(
                 [
-                    "예방보수",
-                    "긴급점검",
-                    "우선점검",
-                    "모니터링",
+                    "매우 높음",
+                    "높음",
+                    "보통",
+                    "낮음",
                 ],
                 fill_value=0,
             )
             .rename_axis(
-                "조치 단계"
+                "상대 위험등급"
             )
             .reset_index(
                 name="격자 수"
@@ -1498,7 +1537,7 @@ with tab_risk:
         )
 
         st.dataframe(
-            action_summary,
+            relative_summary,
             hide_index=True,
             width="stretch",
         )
@@ -1538,6 +1577,38 @@ with tab_risk:
         )
 
     st.markdown(
+        "#### 조치 단계"
+    )
+
+    action_summary = (
+        pred[
+            "action_level"
+        ]
+        .value_counts()
+        .reindex(
+            [
+                "예방보수",
+                "긴급점검",
+                "우선점검",
+                "모니터링",
+            ],
+            fill_value=0,
+        )
+        .rename_axis(
+            "조치 단계"
+        )
+        .reset_index(
+            name="격자 수"
+        )
+    )
+
+    st.dataframe(
+        action_summary,
+        hide_index=True,
+        width="stretch",
+    )
+
+    st.markdown(
         "#### 위험 Trigger 현황"
     )
 
@@ -1572,7 +1643,10 @@ with tab_risk:
         "action_level",
 
         "road_risk_score",
+        "risk_level",
+
         "absolute_risk_score",
+        "absolute_risk_level",
 
         "relative_top_percent",
 
@@ -1642,10 +1716,6 @@ with tab_model:
     validation_metrics = {}
     split = {}
 
-    # ======================================================
-    # 기본 성능
-    # ======================================================
-
     if metrics_path.exists():
 
         try:
@@ -1702,10 +1772,6 @@ with tab_model:
                 {},
             )
 
-            # --------------------------------------------------
-            # Test
-            # --------------------------------------------------
-
             st.markdown(
                 "### 1. 테스트 구간 성능"
             )
@@ -1722,41 +1788,20 @@ with tab_model:
             m1.metric(
                 "Test ROC-AUC",
                 f"{test_metrics.get('roc_auc', 0):.3f}",
-                help=(
-                    "실제 포트홀 발생 표본이 비발생 표본보다 "
-                    "높은 위험점수를 받을 가능성을 나타냅니다."
-                ),
             )
 
             m2.metric(
                 "Test PR-AUC",
                 f"{test_metrics.get('pr_auc', 0):.4f}",
-                help=(
-                    "희귀한 포트홀 발생 클래스에서 "
-                    "Precision과 Recall을 종합적으로 평가합니다."
-                ),
             )
 
             m3.metric(
                 "Test F1",
                 f"{test_metrics.get('f1', 0):.3f}",
-                help=(
-                    "현재 분류 임계값에서 "
-                    "Precision과 Recall의 조화평균입니다."
-                ),
             )
-
-            # --------------------------------------------------
-            # Validation
-            # --------------------------------------------------
 
             st.markdown(
                 "### 2. 검증 구간 성능"
-            )
-
-            st.caption(
-                "분류 임계값을 결정하는 데 사용한 "
-                "Validation 구간입니다."
             )
 
             v1, v2, v3 = st.columns(
@@ -1777,10 +1822,6 @@ with tab_model:
                 "Validation F1",
                 f"{validation_metrics.get('f1', 0):.3f}",
             )
-
-            # --------------------------------------------------
-            # Class imbalance
-            # --------------------------------------------------
 
             train_positive = int(
                 imbalance.get(
@@ -1813,33 +1854,22 @@ with tab_model:
                 f"{train_positive:,}건, "
                 f"음성 {train_negative:,}건으로 "
                 f"양성 비율이 약 "
-                f"{positive_rate:.4%}에 불과합니다. "
-                f"따라서 F1만으로 모델을 판단하지 않고 "
-                f"위험도로를 실제 상위권에 얼마나 집중시키는지 "
-                f"함께 평가합니다."
+                f"{positive_rate:.4%}에 불과한 "
+                f"희귀사건 데이터입니다. "
+                f"따라서 F1만으로 모델을 평가하지 않고 "
+                f"Top-K Capture와 Lift를 함께 확인합니다."
             )
 
     else:
 
         st.warning(
-            "`outputs/metrics_v2.json`이 없습니다. "
-            "모델을 다시 학습해 검증 지표를 생성하십시오."
+            "`outputs/metrics_v2.json`이 없습니다."
         )
-
-    # ======================================================
-    # Top-K
-    # ======================================================
 
     st.divider()
 
     st.markdown(
         "### 3. 위험구간 선별 성능"
-    )
-
-    st.caption(
-        "Road Doctor는 모든 도로를 단순히 0/1로 분류하는 것보다 "
-        "한정된 점검·보수 자원을 실제 위험도가 높은 도로에 "
-        "집중하는 것을 목적으로 합니다."
     )
 
     if topk_path.exists():
@@ -1954,16 +1984,14 @@ with tab_model:
                 "top_30",
             ]:
 
-                item = (
-                    top_k.get(
-                        key
-                    )
+                item = top_k.get(
+                    key
                 )
 
                 if not item:
                     continue
 
-                pct = int(
+                pct_value = int(
                     round(
                         float(
                             item.get(
@@ -1992,7 +2020,7 @@ with tab_model:
                 topk_rows.append(
                     {
                         "선별 범위":
-                            f"상위 {pct}%",
+                            f"상위 {pct_value}%",
 
                         "점검 대상":
                             int(
@@ -2009,13 +2037,14 @@ with tab_model:
                                 f"{total_positive_item:,}"
                             ),
 
-                        "Capture":
+                        "포착률":
                             float(
                                 item.get(
                                     "capture_rate",
                                     0,
                                 )
-                            ),
+                            )
+                            * 100,
 
                         "Lift":
                             float(
@@ -2055,12 +2084,10 @@ with tab_model:
                             "실제 포트홀 포착"
                         ),
 
-                    "Capture":
-                        st.column_config.ProgressColumn(
+                    "포착률":
+                        st.column_config.NumberColumn(
                             "포착률",
-                            min_value=0,
-                            max_value=1,
-                            format="%.1%%",
+                            format="%.1f%%",
                         ),
 
                     "Lift":
@@ -2083,13 +2110,8 @@ with tab_model:
     else:
 
         st.warning(
-            "`outputs/topk_metrics_v2.json`이 없습니다. "
-            "Top-K 평가 결과를 먼저 생성하십시오."
+            "`outputs/topk_metrics_v2.json`이 없습니다."
         )
-
-    # ======================================================
-    # 모델 활용 설명
-    # ======================================================
 
     st.divider()
 
@@ -2105,7 +2127,7 @@ with tab_model:
 향후 포트홀 발생 가능성이 상대적으로 높은 구간을
 우선적으로 선별하는 것입니다.
 
-따라서 실제 운영에서는
+실제 운영에서는
 
 **XGBoost 위험 예측  
 → 상대·절대 위험도 산정  
@@ -2129,10 +2151,7 @@ PR-AUC와 F1뿐 아니라
             f"검증 "
             f"{int(split.get('validation_rows', 0)):,}행 · "
             f"테스트 "
-            f"{int(split.get('test_rows', 0)):,}행 · "
-            f"Validation에서 선정한 임계값 "
-            f"{float(validation_metrics.get('threshold', 0.5)):.4f}를 "
-            f"Test에 동일하게 적용"
+            f"{int(split.get('test_rows', 0)):,}행"
         )
 
 
