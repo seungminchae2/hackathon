@@ -15,7 +15,19 @@
     .map-empty strong { display:block; font-size:21px; margin-bottom:8px; }
     .map-empty code { display:inline-block; margin-top:10px; padding:7px 10px; border-radius:8px; background:#fff; border:1px solid var(--line); }
     .legend { position:absolute; left:16px; bottom:16px; z-index:2; display:flex; gap:9px; align-items:center; padding:9px 12px; border-radius:999px; background:rgba(255,255,255,.94); box-shadow:0 4px 18px rgba(16,35,28,.12); font-size:12px; }
+    .pulse-halo { width:34px; height:34px; border-radius:50%; background:rgba(224,51,42,.55); animation:pulse-halo 1.4s ease-out infinite; pointer-events:none; }
+    @keyframes pulse-halo {
+      0% { transform:scale(0.4); opacity:.9; }
+      100% { transform:scale(2.4); opacity:0; }
+    }
     .dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:4px; }
+    .marker-menu { position:absolute; z-index:20; display:none; min-width:190px; background:#fff; border:1px solid var(--line); border-radius:12px; box-shadow:0 10px 30px rgba(16,35,28,.2); padding:6px; }
+    .marker-menu .mm-title { font-size:11px; color:var(--muted); padding:6px 10px 4px; }
+    .marker-menu button { width:100%; display:flex; align-items:center; gap:8px; text-align:left; padding:9px 10px; border:0; background:transparent; border-radius:8px; cursor:pointer; font-size:13px; font-weight:700; color:var(--ink); }
+    .marker-menu button:hover { background:#f2f6f2; }
+    .marker-menu .mm-repair { color:#0d6b4f; }
+    .marker-menu .mm-inspect { color:#2c5aa0; }
+    .marker-menu .mm-cancel { color:var(--muted); font-weight:600; }
     .side { min-width:0; min-height:0; overflow:hidden; display:flex; flex-direction:column; border-left:1px solid var(--line); background:#fbfcfa; }
     .side-head { padding:20px 18px 14px; border-bottom:1px solid var(--line); background:#fff; }
     .eyebrow { font-size:11px; letter-spacing:.13em; color:var(--green); font-weight:800; }
@@ -56,6 +68,12 @@
       <div id="map"></div>
       <div id="mapEmpty" class="map-empty"><div><strong>카카오 지도 키가 필요합니더</strong><span>.env에 JavaScript 키를 넣고 화면을 새로고침하십시오.</span><br><code>KAKAO_MAP_APP_KEY=발급받은_JavaScript_키</code></div></div>
       <div class="legend"><span><i class="dot" style="background:#d93b36"></i>매우 높음</span><span><i class="dot" style="background:#ed7a2c"></i>높음</span><span><i class="dot" style="background:#e7b642"></i>보통</span><span><i class="dot" style="background:#3d8b68"></i>낮음</span></div>
+      <div id="markerMenu" class="marker-menu">
+        <div class="mm-title"></div>
+        <button class="mm-repair">✅ 보수완료로 표시</button>
+        <button class="mm-inspect">🔍 점검완료로 표시</button>
+        <button class="mm-cancel">취소</button>
+      </div>
     </section>
     <aside class="side">
       <header class="side-head">
@@ -78,6 +96,7 @@
     let selectedId = null;
     let initialized = false;
     const markersById = new Map();
+    const haloOverlaysById = new Map();
     const markerImageCache = new Map();
     let clusterer = null;
     let selectedMarker = null;
@@ -87,10 +106,79 @@
     const num = (v, suffix="") => Number.isFinite(Number(v)) ? `${Number(v).toLocaleString("ko-KR",{maximumFractionDigits:1})}${suffix}` : "-";
     const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
     const label = r => (r.address && String(r.address).trim()) || r.grid_id;
+    const normalizeBool = v => v === true || v === "true" || v === "True" || v === 1 || v === "1";
 
     function send(type, payload={}) {
       window.parent.postMessage({isStreamlitMessage:true,type,...payload}, "*");
     }
+
+    function clearHalo(gridId) {
+      const halo = haloOverlaysById.get(String(gridId));
+      if (halo) {
+        halo.setMap(null);
+        haloOverlaysById.delete(String(gridId));
+      }
+    }
+
+    function completeRepair(row) {
+      const entry = markersById.get(String(row.grid_id));
+      if (entry) {
+        entry.completed = true;
+        entry.inspected = false;
+        entry.marker.setImage(imageFor(entry, selectedId === row.grid_id));
+      }
+      clearHalo(row.grid_id);
+      send("streamlit:setComponentValue", {
+        value: {action: "complete_repair", grid_id: row.grid_id, address: label(row)},
+        dataType: "json",
+      });
+    }
+
+    function completeInspection(row) {
+      const entry = markersById.get(String(row.grid_id));
+      if (entry && !entry.completed) {
+        entry.inspected = true;
+        entry.marker.setImage(imageFor(entry, selectedId === row.grid_id));
+      }
+      clearHalo(row.grid_id);
+      send("streamlit:setComponentValue", {
+        value: {action: "complete_inspection", grid_id: row.grid_id, address: label(row)},
+        dataType: "json",
+      });
+    }
+
+    function hideMarkerMenu() {
+      const menu = document.getElementById("markerMenu");
+      menu.style.display = "none";
+      menu.onclick = null;
+    }
+
+    function showMarkerMenu(row) {
+      if (normalizeBool(row.manual_completed)) return;
+      const entry = markersById.get(String(row.grid_id));
+      if (!entry || !map) return;
+      const point = map.getProjection().containerPointFromCoords(entry.marker.getPosition());
+      const menu = document.getElementById("markerMenu");
+      menu.querySelector(".mm-title").textContent = label(row);
+      menu.style.left = `${point.x + 10}px`;
+      menu.style.top = `${point.y + 10}px`;
+      menu.style.display = "block";
+      menu.onclick = event => {
+        const target = event.target.closest("button");
+        if (!target) return;
+        hideMarkerMenu();
+        if (target.classList.contains("mm-repair")) {
+          if (window.confirm(`${label(row)}\n\n이 위치를 보수완료로 표시할까요?`)) completeRepair(row);
+        } else if (target.classList.contains("mm-inspect")) {
+          if (window.confirm(`${label(row)}\n\n점검완료로 표시할까요?\n위험도는 유지되고, ${14}일간 조치 우선순위에서만 제외됩니다.`)) completeInspection(row);
+        }
+      };
+    }
+
+    document.addEventListener("click", event => {
+      const menu = document.getElementById("markerMenu");
+      if (menu.style.display === "block" && !menu.contains(event.target)) hideMarkerMenu();
+    });
 
     function filteredRows() {
       const q = document.getElementById("search").value.trim().toLowerCase();
@@ -123,17 +211,46 @@
       return image;
     }
 
+    function checkmarkImage(selected) {
+      const key = `check_${selected}`;
+      if (markerImageCache.has(key)) return markerImageCache.get(key);
+      const d = selected ? 30 : 24;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${d/2}" cy="${d/2}" r="${d/2-2}" fill="#13795b" stroke="#fff" stroke-width="${selected ? 3 : 2}"/><path d="M${d*0.28} ${d*0.52} L${d*0.44} ${d*0.68} L${d*0.74} ${d*0.32}" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      const src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      const image = new kakao.maps.MarkerImage(src, new kakao.maps.Size(d, d), {offset: new kakao.maps.Point(d / 2, d / 2)});
+      markerImageCache.set(key, image);
+      return image;
+    }
+
+    function inspectionImage(selected) {
+      const key = `inspect_${selected}`;
+      if (markerImageCache.has(key)) return markerImageCache.get(key);
+      const d = selected ? 30 : 24;
+      const cx = d * 0.44, cy = d * 0.44, r = d * 0.2;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${d/2}" cy="${d/2}" r="${d/2-2}" fill="#2c5aa0" stroke="#fff" stroke-width="${selected ? 3 : 2}"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#fff" stroke-width="2"/><line x1="${cx + r * 0.75}" y1="${cy + r * 0.75}" x2="${d*0.72}" y2="${d*0.72}" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+      const src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      const image = new kakao.maps.MarkerImage(src, new kakao.maps.Size(d, d), {offset: new kakao.maps.Point(d / 2, d / 2)});
+      markerImageCache.set(key, image);
+      return image;
+    }
+
+    function imageFor(entry, selected) {
+      if (entry.completed) return checkmarkImage(selected);
+      if (entry.inspected) return inspectionImage(selected);
+      return markerImage(entry.color, entry.size, selected);
+    }
+
     function selectRow(id, pan) {
       const row = rows.find(r => String(r.grid_id) === String(id));
       if (!row) return;
       selectedId = row.grid_id;
       if (selectedMarker) {
         const prev = selectedMarker;
-        prev.marker.setImage(markerImage(prev.color, prev.size, false));
+        prev.marker.setImage(imageFor(prev, false));
       }
       const entry = markersById.get(String(id));
       if (entry) {
-        entry.marker.setImage(markerImage(entry.color, entry.size, true));
+        entry.marker.setImage(imageFor(entry, true));
         entry.marker.setZIndex(10);
         selectedMarker = entry;
       } else {
@@ -170,35 +287,46 @@
       map = new kakao.maps.Map(document.getElementById("map"), {center:new kakao.maps.LatLng(avgLat,avgLon),level:11});
       map.addControl(new kakao.maps.ZoomControl(), kakao.maps.ControlPosition.RIGHT);
       const HIGH_RISK_LEVELS = new Set(["매우 높음", "높음"]);
-      const clusterMarkers = {high: [], normal: []};
+      const allMarkers = [];
       valid.forEach(r => {
         const size = Math.round(14 + Number(r.risk_score || 0) * 14);
         const color = colors[r.risk_level] || "#3d8b68";
+        const completed = normalizeBool(r.manual_completed);
+        const inspected = normalizeBool(r.inspection_suppressed);
+        const statusLabel = completed ? "보수완료" : (inspected ? "점검완료" : `위험도 ${pct(r.risk_score)}`);
         const marker = new kakao.maps.Marker({
           position: new kakao.maps.LatLng(Number(r.grid_lat), Number(r.grid_lon)),
-          image: markerImage(color, size, false),
-          title: `${label(r)} · 위험도 ${pct(r.risk_score)}`,
-          zIndex: Number(r.priority_rank) <= 20 ? 3 : 1,
+          image: completed ? checkmarkImage(false) : (inspected ? inspectionImage(false) : markerImage(color, size, false)),
+          title: `${label(r)} · ${statusLabel}`,
+          zIndex: (completed || inspected) ? 5 : (Number(r.priority_rank) <= 20 ? 3 : 1),
         });
         kakao.maps.event.addListener(marker, "click", () => selectRow(r.grid_id, false));
-        markersById.set(String(r.grid_id), {marker, color, size});
-        (HIGH_RISK_LEVELS.has(r.risk_level) ? clusterMarkers.high : clusterMarkers.normal).push(marker);
+        kakao.maps.event.addListener(marker, "rightclick", () => showMarkerMenu(r));
+        markersById.set(String(r.grid_id), {marker, color, size, completed, inspected});
+        allMarkers.push(marker);
+        if (r.action_level === "긴급점검" && !completed && !inspected) {
+          const halo = document.createElement("div");
+          halo.className = "pulse-halo";
+          const haloOverlay = new kakao.maps.CustomOverlay({
+            map,
+            position: new kakao.maps.LatLng(Number(r.grid_lat), Number(r.grid_lon)),
+            content: halo,
+            zIndex: 0,
+            xAnchor: 0.5,
+            yAnchor: 0.5,
+          });
+          haloOverlaysById.set(String(r.grid_id), haloOverlay);
+        }
       });
-      const clusterStyle = textColor => [{
-        width: "40px", height: "40px", lineHeight: "40px",
-        background: "rgba(13,107,79,.85)", color: textColor,
-        borderRadius: "50%", textAlign: "center", fontWeight: "800", fontSize: "13px",
-      }];
-      clusterer = [
-        new kakao.maps.MarkerClusterer({
-          map, markers: clusterMarkers.normal, averageCenter: false, gridSize: 160, minLevel: 6,
-          disableClickZoom: false, styles: clusterStyle("#fff"),
-        }),
-        new kakao.maps.MarkerClusterer({
-          map, markers: clusterMarkers.high, averageCenter: false, gridSize: 160, minLevel: 6,
-          disableClickZoom: false, styles: clusterStyle("#ff5c4d"),
-        }),
-      ];
+      clusterer = new kakao.maps.MarkerClusterer({
+        map, markers: allMarkers, averageCenter: false, gridSize: 160, minLevel: 6,
+        disableClickZoom: false,
+        styles: [{
+          width: "40px", height: "40px", lineHeight: "40px",
+          background: "rgba(13,107,79,.85)", color: "#fff",
+          borderRadius: "50%", textAlign: "center", fontWeight: "800", fontSize: "13px",
+        }],
+      });
     }
 
     function initialize() {

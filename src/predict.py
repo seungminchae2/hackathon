@@ -44,12 +44,20 @@ def main(config_path: str, prediction_date: str | None = None) -> None:
             temp_path = Path(temp_file.name)
         combined.to_csv(temp_path, index=False)
 
-        available_dates = pd.to_datetime(forecast["date"], errors="coerce").dropna()
-        target_date = (
-            pd.Timestamp(prediction_date).normalize()
-            if prediction_date
-            else available_dates.max().normalize()
-        )
+        available_dates = pd.to_datetime(forecast["date"], errors="coerce").dropna().dt.normalize()
+        if prediction_date:
+            target_date = pd.Timestamp(prediction_date).normalize()
+        else:
+            # 기본값은 "오늘" 기준 예측입니다. 예보에 오늘 날짜가 없으면(예: API 지연)
+            # 가장 가까운 미래 날짜를, 그마저 없으면 예보의 마지막 날짜를 씁니다.
+            today = pd.Timestamp.today().normalize()
+            if (available_dates == today).any():
+                target_date = today
+            else:
+                future_dates = available_dates.loc[available_dates >= today]
+                target_date = (
+                    future_dates.min() if not future_dates.empty else available_dates.max()
+                )
         prepared = prepare_dataset(
             pothole_path=resolve_path(config, "potholes"),
             repair_path=resolve_path(config, "repairs"),

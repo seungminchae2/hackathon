@@ -66,7 +66,7 @@ config = load_config(
 # ==========================================================
 
 st.set_page_config(
-    page_title="전북 특별 민원창구",
+    page_title="Road Doctor",
     page_icon="🛣️",
     layout="wide",
 )
@@ -1001,6 +1001,56 @@ def render_board(title: str, subtitle: str, events: pd.DataFrame, date_column: s
         st.markdown("".join(rows_html), unsafe_allow_html=True)
 
 
+MANUAL_REPAIRS_PATH = BASE_DIR / "data" / "manual_repairs.csv"
+
+
+def load_manual_repairs() -> pd.DataFrame:
+    """지도에서 우클릭으로 '보수완료' 처리한 격자 목록을 불러옵니다."""
+    if not MANUAL_REPAIRS_PATH.exists():
+        return pd.DataFrame(columns=["grid_id", "address", "completed_at"])
+    return pd.read_csv(MANUAL_REPAIRS_PATH)
+
+
+def save_manual_repair(grid_id: str, address: str) -> pd.DataFrame:
+    """새 보수완료 처리를 파일에 추가합니다(같은 격자는 중복 저장하지 않음)."""
+    existing = load_manual_repairs()
+    if grid_id in existing["grid_id"].astype(str).values:
+        return existing
+    new_row = pd.DataFrame(
+        [{"grid_id": grid_id, "address": address, "completed_at": pd.Timestamp.now()}]
+    )
+    updated = pd.concat([existing, new_row], ignore_index=True)
+    MANUAL_REPAIRS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    updated.to_csv(MANUAL_REPAIRS_PATH, index=False)
+    return updated
+
+
+MANUAL_INSPECTIONS_PATH = BASE_DIR / "data" / "manual_inspections.csv"
+INSPECTION_SUPPRESSION_DAYS = 14
+# 점검 후 재위험화 주기는 학습 데이터에 없어(last_inspection_date 미보유) 운영 정책으로 정한 값입니다.
+# 위험도 자체는 낮추지 않고, 이 기간 동안만 조치 우선순위 노출을 억제합니다.
+
+
+def load_manual_inspections() -> pd.DataFrame:
+    """지도에서 우클릭으로 '점검완료' 처리한 격자 목록을 불러옵니다."""
+    if not MANUAL_INSPECTIONS_PATH.exists():
+        return pd.DataFrame(columns=["grid_id", "address", "completed_at"])
+    return pd.read_csv(MANUAL_INSPECTIONS_PATH)
+
+
+def save_manual_inspection(grid_id: str, address: str) -> pd.DataFrame:
+    """새 점검완료 처리를 파일에 추가합니다(같은 격자는 날짜만 갱신)."""
+    existing = load_manual_inspections()
+    existing = existing[existing["grid_id"].astype(str) != str(grid_id)]
+    new_row = pd.DataFrame(
+        [{"grid_id": grid_id, "address": address, "completed_at": pd.Timestamp.now()}]
+    )
+    updated = pd.concat([existing, new_row], ignore_index=True)
+    MANUAL_INSPECTIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    updated.to_csv(MANUAL_INSPECTIONS_PATH, index=False)
+    return updated
+
+
 # ==========================================================
 # predictions 로딩
 # ==========================================================
@@ -1078,11 +1128,15 @@ if (
         )
     )
 
+    _today_iso = date.today().isoformat()
+    _relation = (
+        "오늘보다 이전" if current_prediction_date < _today_iso else "오늘보다 이후"
+    )
+
     banner_col.info(
         f"예측 기준일이 "
         f"{current_prediction_date}로 "
-        f"오늘({date.today().isoformat()})보다 "
-        f"오래됐습니다."
+        f"오늘({_today_iso})과 다릅니다 ({_relation})."
     )
 
     if button_col.button(
@@ -1157,6 +1211,57 @@ pred = attach_road_authority(
 
 
 # ==========================================================
+# 지도 우클릭 결과 처리
+# (게시판/KPI가 이 값을 읽기 전에 먼저 파일에 반영해야
+#  같은 rerun 안에서 바로 화면에 보입니다. key가 고정된 컴포넌트는
+#  반환값이 show_kakao_map() 호출 전에도 session_state로 먼저 들어옵니다.)
+# ==========================================================
+
+_pending_map_action = st.session_state.get("road_doctor_map")
+if isinstance(_pending_map_action, dict):
+    _action_grid_id = str(_pending_map_action.get("grid_id", ""))
+    _action_address = str(_pending_map_action.get("address", ""))
+    if _action_grid_id and _pending_map_action.get("action") == "complete_repair":
+        if _action_grid_id not in set(load_manual_repairs()["grid_id"].astype(str)):
+            save_manual_repair(_action_grid_id, _action_address)
+    elif _action_grid_id and _pending_map_action.get("action") == "complete_inspection":
+        save_manual_inspection(_action_grid_id, _action_address)
+
+
+# ==========================================================
+# 지도에서 우클릭으로 보수완료 처리한 격자
+# ==========================================================
+
+manual_repairs = load_manual_repairs()
+completed_grid_ids = set(manual_repairs["grid_id"].astype(str))
+pred["manual_completed"] = pred["grid_id"].astype(str).isin(completed_grid_ids)
+
+
+# ==========================================================
+# 지도에서 우클릭으로 점검완료 처리한 격자
+# (위험도는 유지, 일정 기간만 조치 우선순위에서 억제)
+# ==========================================================
+
+manual_inspections = load_manual_inspections()
+if not manual_inspections.empty:
+    manual_inspections["completed_at"] = pd.to_datetime(
+        manual_inspections["completed_at"], errors="coerce"
+    )
+    suppression_cutoff = pd.Timestamp.now() - pd.Timedelta(days=INSPECTION_SUPPRESSION_DAYS)
+    suppressed_mask = manual_inspections["completed_at"] >= suppression_cutoff
+    inspected_grid_ids = set(manual_inspections["grid_id"].astype(str))
+    suppressed_grid_ids = set(
+        manual_inspections.loc[suppressed_mask, "grid_id"].astype(str)
+    )
+else:
+    inspected_grid_ids = set()
+    suppressed_grid_ids = set()
+
+pred["manual_inspected"] = pred["grid_id"].astype(str).isin(inspected_grid_ids)
+pred["inspection_suppressed"] = pred["grid_id"].astype(str).isin(suppressed_grid_ids)
+
+
+# ==========================================================
 # Kakao Map key
 # ==========================================================
 
@@ -1188,7 +1293,7 @@ kakao_key = (
 
 st.markdown(
     '<div class="rd-header">'
-    '<span class="rd-title">전북 특별 민원창구</span>'
+    '<span class="rd-title">Road Doctor</span>'
     '<span class="rd-caption">전북 500m 도로 격자별 AI 포트홀 위험 예측 · '
     '상대 위험도 + 절대 위험도 + 위험 Trigger를 종합한 예방적 도로 유지보수 의사결정 시스템</span>'
     "</div>",
@@ -1201,13 +1306,11 @@ st.markdown(
 # ==========================================================
 
 emergency_count = int(
-    pred[
-        "action_level"
-    ]
-    .eq(
-        "긴급점검"
-    )
-    .sum()
+    (
+        pred["action_level"].eq("긴급점검")
+        & ~pred["manual_completed"]
+        & ~pred["inspection_suppressed"]
+    ).sum()
 )
 
 
@@ -1234,13 +1337,11 @@ priority_count = int(
 
 
 monitor_count = int(
-    pred[
-        "action_level"
-    ]
-    .eq(
-        "모니터링"
-    )
-    .sum()
+    (
+        pred["action_level"].eq("모니터링")
+        | pred["manual_completed"]
+        | pred["inspection_suppressed"]
+    ).sum()
 )
 
 
@@ -1403,10 +1504,13 @@ if not kakao_key:
 
 
 # 긴급점검으로 분류된 격자만 알림 게시판에 반짝임과 함께 띄웁니다.
-# (합성 샘플 데이터인 data/potholes.csv 기반 "발생" 이력은 실제 데이터가 아니라서 제외)
-emergency_rows = pred.loc[pred["action_level"].eq("긴급점검")].sort_values(
-    "absolute_risk_score", ascending=False
-)
+# (합성 샘플 데이터인 data/potholes.csv 기반 "발생" 이력은 실제 데이터가 아니라서 제외,
+#  지도에서 보수완료 처리했거나, 점검완료 후 억제 기간 이내인 격자도 제외)
+emergency_rows = pred.loc[
+    pred["action_level"].eq("긴급점검")
+    & ~pred["manual_completed"]
+    & ~pred["inspection_suppressed"]
+].sort_values("absolute_risk_score", ascending=False)
 pothole_events = pd.DataFrame(
     {
         "event_date": pd.Timestamp.now(),
@@ -1420,9 +1524,28 @@ pothole_events = pd.DataFrame(
     }
 )
 
-repair_events = load_recent_events(BASE_DIR / "data" / "repairs.csv", "repair_date", pred)
+# 지도에서 우클릭으로 보수완료 처리한 격자만 표시합니다.
+# (합성 샘플 데이터인 data/repairs.csv 기반 이력은 실제 데이터가 아니라서 제외)
+repair_events = manual_repairs.copy()
 if not repair_events.empty:
-    repair_events["meta_text"] = repair_events.get("repair_type", pd.Series(dtype=object)).fillna("")
+    repair_events["completed_at"] = pd.to_datetime(repair_events["completed_at"], errors="coerce")
+    repair_events = repair_events.sort_values("completed_at", ascending=False)
+    repair_events["meta_text"] = "지도에서 보수완료 처리됨"
+
+# 지도에서 우클릭으로 점검완료 처리한 격자만 표시합니다.
+inspection_events = manual_inspections.copy()
+if not inspection_events.empty:
+    inspection_events["completed_at"] = pd.to_datetime(
+        inspection_events["completed_at"], errors="coerce"
+    )
+    inspection_events = inspection_events.sort_values("completed_at", ascending=False)
+    days_left = (
+        INSPECTION_SUPPRESSION_DAYS
+        - (pd.Timestamp.now() - inspection_events["completed_at"]).dt.days
+    ).clip(lower=0)
+    inspection_events["meta_text"] = (
+        "위험도는 유지, 우선순위 억제 " + days_left.astype(str) + "일 남음"
+    )
 
 board_col, map_col = st.columns([1, 2.3], gap="medium")
 
@@ -1439,25 +1562,28 @@ with board_col:
     )
     render_board(
         "✅ 보수완료",
-        f"최근 보수완료 {len(repair_events)}건",
+        f"지도에서 처리한 보수완료 {len(repair_events)}건",
         repair_events,
-        "repair_date",
+        "completed_at",
         "완료",
         "rd-badge-done",
         127,
-        "등록된 보수완료 이력이 없습니다.",
+        "지도에서 긴급점검 마커를 우클릭하면 여기에 표시됩니다.",
     )
     render_board(
         "🔍 점검완료",
-        "점검 이력 연동 예정",
-        pd.DataFrame(),
-        "inspection_date",
+        f"지도에서 처리한 점검완료 {len(inspection_events)}건 · {INSPECTION_SUPPRESSION_DAYS}일간 우선순위 억제",
+        inspection_events,
+        "completed_at",
         "점검",
         "rd-badge-check",
         127,
-        "등록된 점검 이력이 없습니다. 데이터 연동 예정입니다.",
+        "지도에서 마커를 우클릭하고 '점검완료'를 선택하면 여기에 표시됩니다.",
     )
 
+# 컴포넌트 반환값 처리(파일 저장)는 스크립트 위쪽에서 이미 끝냈습니다
+# (게시판이 최신 상태로 그려지도록). 여기서는 지도만 그립니다.
+# key가 고정돼 있어 iframe은 새로고침 없이 유지됩니다.
 with map_col:
     show_kakao_map(
         pred,
@@ -1514,15 +1640,6 @@ with tab_action:
         "risk_reason",
 
         "preventive_repair_candidate",
-
-        "past_potholes_30d",
-        "past_potholes_90d",
-        "past_potholes_total",
-
-        "days_since_last_repair",
-
-        "freeze_thaw_7d",
-        "precip_7d",
 
         "road_authority_dept",
         "road_authority_phone",
@@ -1741,13 +1858,7 @@ with tab_risk:
         "risk_trigger",
 
         "past_potholes_30d",
-        "past_potholes_90d",
-        "past_potholes_total",
 
-        "days_since_last_repair",
-
-        "freeze_thaw_7d",
-        "snowfall",
         "precip_7d",
 
         "road_structure_score",
