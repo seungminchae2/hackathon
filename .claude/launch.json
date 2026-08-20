@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "road-doctor",
+      "runtimeExecutable": "streamlit",
+      "runtimeArgs": ["run", "app.py"],
+      "port": 8501
+    },
+    {
+      "name": "mecha-preview",
+      "runtimeExecutable": "streamlit",
+      "runtimeArgs": ["run", "C:/Users/hjlee/.claude/mecha-preview/app.py", "--server.port", "8502"],
+      "port": 8502
+    }
+  ]
+}
